@@ -1369,6 +1369,74 @@ class ImpactUpdateServiceTests(unittest.TestCase):
                 self.assertEqual(self.store[original_path], original)
         self.generator.assert_not_called()
 
+    def test_previously_verified_suite_reassesses_exact_rows_under_shared_admission(self):
+        pending, _ = self._generated_suite_pending_review(provenance="absent")
+        assessments = []
+
+        def critic(settings, prompt, **kwargs):
+            data, output = critic_output(prompt)
+            assessments.append(data)
+            return json.dumps(output)
+
+        with self._mock_grouped_suite_review(critic):
+            previous = self._review_saved_suite(pending)
+        suite = previous.current_snapshots["test_cases"]
+        original_path = f"qa_projects/{previous.project_id}/snapshots/{suite.snapshot_id}"
+        original = deepcopy(self.store[original_path])
+        self.assertEqual(previous.suite_quality.design_status, "complete")
+        case = suite.payload["test_cases"][0]
+        source = previous.current_snapshots["requirements"].payload["requirements"][0]
+        finding = {
+            "requirement_id": source["id"],
+            "source_quote": source["text"],
+            "obligation": "Verify the durable result after reload",
+            "status": "unmet",
+            "reason": "The exact saved assertion lacks a durable observation.",
+            "evidence": [{"test_case_id": case["id"], **{key: case["steps"][0][key] for key in ("step", "action", "expected")}}],
+            "assessment_method": "deterministic_regression_guard",
+        }
+        self.transaction_client.project = admission.DEMO_PROJECT_ID
+        self.transaction_client._emulator_host = "127.0.0.1:44124"
+        with (
+            patch.object(substantive_review, "known_regression_findings", return_value=([finding], [])),
+            self._mock_grouped_suite_review(critic),
+        ):
+            current = get_project(previous.project_id, actor=self.actor)
+            self.assertEqual(current.suite_quality.source_freshness, "current")
+            self.assertEqual(current.suite_quality.design_status, "unknown")
+            self.assertIn("design_reassessment_required", current.suite_quality.reason_codes)
+            with patch.object(suite_review, "draft_admission_client", return_value=None), self.assertRaises(HTTPException) as disabled:
+                self._review_saved_suite(current)
+            self.assertEqual(disabled.exception.status_code, 409)
+            with (
+                patch.object(suite_review, "draft_admission_client", return_value=self.transaction_client),
+                patch.object(admission, "demo_client_matches", return_value=True),
+                patch.object(admission, "transactional", side_effect=_run_transaction),
+            ):
+                result = self._review_saved_suite(current)
+                dispatched = len(assessments)
+                self.assertEqual(self._review_saved_suite(current).current_revision, result.current_revision)
+                self.assertEqual(len(assessments), dispatched)
+                receipt = admission.read_draft_attempt_result(
+                    self.transaction_client,
+                    project_id=current.project_id,
+                    actor_id=self.actor.sub,
+                    request_id="review-test",
+                    operation=suite_review.REVIEW_OPERATION,
+                    source_snapshot_id=suite.snapshot_id,
+                    base_revision=current.current_revision,
+                )
+                self.assertTrue(receipt)
+        snapshot = result.current_snapshots["test_cases"]
+        published = self.store[f"qa_projects/{result.project_id}/snapshots/{snapshot.snapshot_id}"]
+        self.assertEqual(result.suite_quality.design_status, "incomplete")
+        self.assertFalse(result.reviewed_design_available)
+        self.assertEqual(snapshot.source_snapshot_id, suite.snapshot_id)
+        self.assertEqual(published["payload"]["test_cases"], original["payload"]["test_cases"])
+        self.assertIn(finding["obligation"], [row["obligation"] for row in snapshot.payload["substantive_assessment"]["obligations"]])
+        self.assertEqual(self.store[original_path], original)
+        self.generator.assert_not_called()
+
     def test_saved_suite_grouped_review_publishes_verified_gaps_but_not_an_unavailable_review(self):
         project, path = self._generated_suite_pending_review()
         original = deepcopy(self.store[path])

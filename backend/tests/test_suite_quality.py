@@ -1,6 +1,7 @@
 from copy import deepcopy
 from datetime import datetime, timezone
 from unittest import TestCase
+from unittest.mock import patch
 
 from pydantic import ValidationError
 
@@ -336,6 +337,28 @@ class SuiteQualityTests(TestCase):
         attach_suite(project, _serialize_value(payload), _serialize_value(metadata), proof=_serialize_value(proof))
         state = resolve_suite_quality(project)
         self.assertEqual((state.source_freshness, state.design_status), ("current", "complete"))
+
+    def test_reassessment_requires_the_original_exact_complete_proof(self):
+        for altered in (None, "proof_hash", "source_stale", "archived", "different_parent"):
+            with self.subTest(altered=altered):
+                project, payload, metadata = fixture()
+                proof = self.proof(project, payload, metadata)
+                suite = attach_suite(project, payload, metadata, proof=proof)
+                if altered == "proof_hash":
+                    suite.metadata["suite_design_proof"]["case_content_hash"] = "0" * 64
+                elif altered == "source_stale":
+                    project.stage_state["use_cases"].stale = True
+                elif altered == "archived":
+                    project.status = "archived"
+                elif altered == "different_parent":
+                    suite.source_snapshot_id = "different-plan"
+                original = suite.model_dump(mode="json")
+                with patch("app.services.suite_quality._complete_assessment", return_value=False):
+                    result = resolve_suite_quality(project, raw_suite=suite)
+                self.assertEqual(result.design_status, "unknown")
+                self.assertEqual("design_reassessment_required" in result.reason_codes, altered is None)
+                self.assertEqual(result.source_freshness == "current", altered is None)
+                self.assertEqual(suite.model_dump(mode="json"), original)
 
     def test_structural_failure_and_placeholder_cannot_be_verified_complete(self):
         project, payload, metadata = fixture()

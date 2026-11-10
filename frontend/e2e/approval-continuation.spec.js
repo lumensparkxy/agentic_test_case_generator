@@ -29,6 +29,8 @@ const readyScenario = "Verify the current checkout confirmation";
 const readySuiteId = "checkout-generated-suite-v2";
 const readyTest = "Confirm that the saved-card purchase creates one order";
 const testExpected = "One confirmed order is recorded for the purchase.";
+const recheckExpected = "There is not exactly one saved order.";
+const recheckFinding = "Verify one durable order after refreshing";
 const progress = (page) => page.getByRole("region", { name: "Scenario preparation", exact: true });
 const testProgress = (page) => page.getByRole("region", { name: "Test case generation", exact: true });
 const approve = (page) => page.getByRole("button", { name: "Approve scope and prepare scenarios", exact: true });
@@ -154,6 +156,27 @@ async function fixture(
 			project.current_revision++;
 			saveSuite(project, { cases: completedCases });
 			if (savedReview?.currentSuiteAssessed) assessSavedSuite(project);
+			if (savedReview?.reassessment) {
+				const suite = project.current_snapshots.test_cases;
+				Object.assign(suite, {
+					operation: "test_cases.review",
+					source_snapshot_id: "checkout-earlier-suite",
+					approved: true,
+					metadata: {},
+				});
+				suite.payload.test_cases[0].steps[0].expected = recheckExpected;
+				suite.payload.substantive_assessment = { status: "assessed_complete", design_status: "assessed_complete" };
+				suite.payload.review = { approved: true, summary: "Previous assessment passed." };
+				project.suite_quality = {
+					suite_snapshot_id: suite.snapshot_id,
+					source_freshness: "current",
+					design_status: "unknown",
+					scenario_decision: "approved",
+					scenario_snapshot_id: readyPlanId,
+					declared_setup: "not_assessed",
+					reason_codes: ["design_reassessment_required"],
+				};
+			}
 		}
 	}
 	const other = useCaseProjectFixture({ project_id: "continuation-second-project", name: "Separate checkout", snapshot: null });
@@ -433,6 +456,18 @@ async function fixture(
 			return route.abort("failed");
 		}
 		assessSavedSuite(project);
+		if (savedReview?.reassessment) {
+			const suite = project.current_snapshots.test_cases;
+			suite.approved = project.stage_state.test_cases.approved = false;
+			suite.payload.review = { approved: false, summary: recheckFinding };
+			suite.payload.substantive_assessment = { status: "incomplete", design_status: "incomplete" };
+			project.suite_quality = {
+				...project.suite_quality,
+				suite_snapshot_id: suite.snapshot_id,
+				design_status: "incomplete",
+				reason_codes: [],
+			};
+		}
 		return route.fulfill({ json: project });
 	});
 	await page.route(routePath(releasePath), async (route) => {
@@ -1179,6 +1214,36 @@ test.describe("Recoverable approval continuation", () => {
 		await expect(testProgress(page)).toHaveCount(0);
 		expect(api.writes).toEqual([`POST ${scenarioReviewPath}`]);
 		expect(api.executionRequests).toEqual([]);
+		expect(api.errors).toEqual([]);
+	});
+
+	test("reassesses an exact saved suite when its previous design proof no longer verifies", async ({ page }, testInfo) => {
+		await page.setViewportSize({ width: 1440, height: 900 });
+		const api = await fixture(page, { prepared: true, testsEnabled: false, savedReview: { reassessment: true } });
+		await page.goto(`${root}/review/tests`);
+		const quality = page.getByRole("region", { name: "Saved suite quality", exact: true });
+		await expect(quality).toContainText(/Independent design\s*Unknown/);
+		await expect(quality).toContainText(/Scenario approval\s*Approved/);
+		await expect(reviewSaved(page)).toBeEnabled({ timeout: 4000 });
+		await expect(page.getByText("Saved suite review passed.", { exact: true })).toHaveCount(0);
+		await expect(page.getByText("The previous assessment needs to be checked again.", { exact: false })).toBeVisible();
+		await page.getByRole("tab", { name: /^Generated Test Cases/ }).press("Enter");
+		const reader = page.getByRole("region", { name: "Selected test case", exact: true });
+		await expect(reader).toContainText(recheckExpected);
+		expect(api.writes).toEqual([]);
+		await reviewSaved(page).focus();
+		await page.screenshot({ path: testInfo.outputPath("reassess-exact-saved-suite.png") });
+		await page.keyboard.press("Enter");
+		await expect(quality).toContainText(/Independent design\s*Incomplete/);
+		await expect(quality).toContainText(/Scenario approval\s*Approved/);
+		await expect(page.getByText(recheckFinding, { exact: true })).toBeVisible();
+		await expect(reviewSaved(page)).toHaveCount(0);
+		await page.reload();
+		await page.getByRole("tab", { name: /^Generated Test Cases/ }).press("Enter");
+		await expect(reader).toContainText(recheckExpected);
+		expect(api.savedReviewRequests).toHaveLength(1);
+		expect(api.savedReviewRequests[0].input.snapshot_id).toBe(readySuiteId);
+		expect(api.writes).toEqual([`POST ${savedReviewPath}`]);
 		expect(api.errors).toEqual([]);
 	});
 

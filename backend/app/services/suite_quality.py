@@ -14,6 +14,7 @@ from .test_case_quality import case_source_hash, placeholder_reason
 
 _PROOF_VERSION = 1
 _PROOF_OPERATIONS = {"testcases.generate", "test_cases.review"}
+DESIGN_REASSESSMENT_REQUIRED = "design_reassessment_required"
 _VERSION_FIELDS = {"artifact_set_id", "artifact_item_id", "artifact_version_id", "artifact_version_number"}
 _SOURCE_FIELDS = {
     "requirements": "source_requirements_snapshot_id",
@@ -471,16 +472,24 @@ def resolve_suite_quality(project, *, raw_suite=None):
     ):
         recomputed = build_suite_design_proof(project, suite.payload, metadata, plan_snapshot_id=plan_id)
         parent_id = plan_id if suite.operation == "testcases.generate" else proof.get("reviewed_suite_snapshot_id")
-        if (
-            recomputed
-            and _text(parent_id)
-            and parent_id == suite.source_snapshot_id
-            and case_source_hash(proof) == case_source_hash({**recomputed, "suite_snapshot_id": suite.snapshot_id})
-        ):
-            source_freshness = "current"
-            design_status = recomputed["design_status"]
+        if recomputed and _text(parent_id) and parent_id == suite.source_snapshot_id:
+            current_proof = {**recomputed, "suite_snapshot_id": suite.snapshot_id}
+            proof_hash = case_source_hash(proof)
+            if proof_hash == case_source_hash(current_proof):
+                source_freshness = "current"
+                design_status = recomputed["design_status"]
+                reasons.append(recomputed["reason_code"])
+            elif (
+                project.status == "active"
+                and "sync_review_binding" not in metadata
+                and recomputed["reason_code"] == "independent_design_unverified"
+                and proof_hash == case_source_hash({**current_proof, "design_status": "complete", "reason_code": "design_verified"})
+            ):
+                # Every saved binding still matches. Only the previous complete assessment no longer verifies.
+                source_freshness = "current"
+                reasons.append(DESIGN_REASSESSMENT_REQUIRED)
+        if source_freshness == "current":
             declared_setup = "blocked" if setup_blocked else "not_assessed"
-            reasons.append(recomputed["reason_code"])
         else:
             reasons.append("design_proof_unverified")
     else:

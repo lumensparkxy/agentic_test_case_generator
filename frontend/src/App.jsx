@@ -1043,8 +1043,16 @@ export default function App() {
 		approvedGenerationScopeReady &&
 		useCasesHumanApproved &&
 		savedSuite.metadata?.review_retry_available === true;
-	const savedSuiteReviewPending =
-		persistedTestCaseCount > 0 &&
+	const currentSuiteSnapshotId =
+		PROJECT_WORKSPACES_V2 && route.projectId === currentProjectId && savedSuite?.snapshot_id === testCaseStageState.current_snapshot_id
+			? savedSuite?.snapshot_id
+			: null;
+	const suiteQuality =
+		currentSuiteSnapshotId && currentProject?.suite_quality?.suite_snapshot_id === currentSuiteSnapshotId
+			? currentProject.suite_quality
+			: null;
+	const reassessSavedProof = APPROVAL_CONTINUATION_ENABLED && suiteQuality?.reason_codes?.includes("design_reassessment_required");
+	const pendingStoredReview =
 		savedSuite?.payload?.substantive_assessment?.status === "unknown" &&
 		(syncDraftSuite
 			? syncDraftReviewReady
@@ -1052,6 +1060,7 @@ export default function App() {
 				? APPROVAL_CONTINUATION_ENABLED && !testCaseStageState.stale
 				: savedSuite?.metadata?.review_retry_available === true ||
 					["impact.update.apply", "testcases.refine", "quality.feedback.apply"].includes(savedSuite?.operation));
+	const savedSuiteReviewPending = persistedTestCaseCount > 0 && (reassessSavedProof || pendingStoredReview);
 
 	const savedSuiteInputsReady =
 		currentProject?.status === "active" &&
@@ -1059,7 +1068,7 @@ export default function App() {
 		useCasesHumanApproved &&
 		(!testCaseStageState.stale || savedSuite?.operation === "quality.feedback.apply");
 	const savedSuiteReviewState = savedSuiteReview?.key === savedSuiteReviewKey ? savedSuiteReview : null;
-	const savedSuiteReviewed = savedSuite?.operation === "test_cases.review" && !testCaseStageState.stale;
+	const savedSuiteReviewed = savedSuite?.operation === "test_cases.review" && !testCaseStageState.stale && !reassessSavedProof;
 	const syncSuiteReviewSaved =
 		APPROVAL_CONTINUATION_ENABLED &&
 		savedSuiteReviewed &&
@@ -2531,7 +2540,7 @@ export default function App() {
 		(approvalContinuation.active || approvalContinuation.unresolved || approvalContinuation.run?.state === "interrupted");
 	const savedSuiteReviewDisabled =
 		savedSuiteReviewUnavailable ||
-		(syncDraftSuite && !savedReview.enabled) ||
+		((syncDraftSuite || reassessSavedProof) && !savedReview.enabled) ||
 		(selectedRepair.enabled &&
 			(selectedRepair.attempt ||
 				selectedRepair.pending ||
@@ -4534,14 +4543,6 @@ export default function App() {
 		apply_update: testCaseActionDisabled,
 	};
 	const exportEvidenceKey = `${currentProjectId}:${projectSnapshots.test_cases?.snapshot_id}:${currentProjectRevision}`;
-	const currentSuiteSnapshotId =
-		PROJECT_WORKSPACES_V2 && route.projectId === currentProjectId && savedSuite?.snapshot_id === testCaseStageState.current_snapshot_id
-			? savedSuite?.snapshot_id
-			: null;
-	const suiteQuality =
-		currentSuiteSnapshotId && currentProject?.suite_quality?.suite_snapshot_id === currentSuiteSnapshotId
-			? currentProject.suite_quality
-			: null;
 	const declaredBrowserSetup =
 		suiteQuality && [PROJECT_DESTINATIONS.REPORTS, PROJECT_DESTINATIONS.AUTOMATION].includes(route.destination)
 			? getCurrentDeclaredBrowserSetup(currentProject)
@@ -6848,7 +6849,9 @@ export default function App() {
 															{savedSuiteInputsReady
 																? syncDraftSuite
 																	? "Assess the saved cases against the approved scenarios and accepted correction. The saved steps and case versions stay the same."
-																	: "Check the saved cases against current requirements and Use Cases. The case steps and versions stay the same."
+																	: reassessSavedProof
+																		? "The previous assessment needs to be checked again. Review these saved cases against the current assessment rules."
+																		: "Check the saved cases against current requirements and Use Cases. The case steps and versions stay the same."
 																: "Review current Requirements and Use Cases or resolve upstream changes first."}
 														</p>
 													</div>

@@ -23,7 +23,7 @@ from .orchestrator_service import _use_cases_human_approved
 from .project_draft_admission import REPAIR_OPERATION, SCOPED_IMPACT_OPERATION, claim_draft_attempt, draft_admission_client, read_draft_attempt_result
 from .project_sync_review import SYNC_REVIEW_OPERATIONS, verify_sync_review
 from .requirement_scope import approved_generation_requirements
-from .suite_quality import build_suite_design_proof
+from .suite_quality import DESIGN_REASSESSMENT_REQUIRED, build_suite_design_proof
 from .test_case_quality import case_source_hash, delivered_coverage, generated_suite_review_retryable, separate_generation_work
 from .test_case_review_progress import SavedReviewProgress
 from .workflow_project_service import ProjectConflictError, _serialize_value, append_stage_snapshot, get_project, get_project_stage_snapshot
@@ -339,7 +339,11 @@ def review_saved_test_cases(*, project_id: str, snapshot_id: str, base_project_r
     generated_retry = generated_suite_review_retryable(current)
     pending_review = (current.payload.get("substantive_assessment") or {}).get("status") == "unknown"
     sync_review = current.operation in SYNC_REVIEW_OPERATIONS
-    if not generated_retry and ((current.operation not in REVIEWABLE_OPERATIONS and not sync_review) or not pending_review):
+    quality = project.suite_quality
+    reassess_proof = bool(
+        client is not None and quality and quality.suite_snapshot_id == current.snapshot_id and DESIGN_REASSESSMENT_REQUIRED in quality.reason_codes
+    )
+    if not generated_retry and not reassess_proof and ((current.operation not in REVIEWABLE_OPERATIONS and not sync_review) or not pending_review):
         raise HTTPException(409, "The current suite has no pending saved-suite assessment.")
     if project.stage_state["test_cases"].stale and current.operation != "quality.feedback.apply":
         raise HTTPException(409, "Upstream inputs changed. Analyze their impact before reviewing the saved suite.")
@@ -353,7 +357,10 @@ def review_saved_test_cases(*, project_id: str, snapshot_id: str, base_project_r
         recorded, context, review_scope = _prepare_sync_review(client, project, original, actor, request_id, requirements, plans, sources)
     exact_sources = _recorded_sources_match(recorded, sources)
     requires_exact_sources = (
-        sync_review or current.operation == REPAIR_OPERATION or (current.operation == SCOPED_IMPACT_OPERATION and "scoped_impact" in original.metadata)
+        reassess_proof
+        or sync_review
+        or current.operation == REPAIR_OPERATION
+        or (current.operation == SCOPED_IMPACT_OPERATION and "scoped_impact" in original.metadata)
     )
     if requires_exact_sources and not exact_sources:
         raise HTTPException(409, "The updated suite no longer matches its recorded sources. Analyze their impact before reviewing.")
@@ -390,7 +397,7 @@ def review_saved_test_cases(*, project_id: str, snapshot_id: str, base_project_r
         progress.clear_on_commit(transaction, snapshot)
 
     try:
-        if generated_retry:
+        if generated_retry or (reassess_proof and original.operation == "testcases.generate"):
             review_scope, context = _prepare_generated_review(original, sources, requirements, context, actor, request_id, memory_bypass=admission is not None)
         elif exact_sources and not sync_review:
             try:
@@ -424,7 +431,7 @@ def review_saved_test_cases(*, project_id: str, snapshot_id: str, base_project_r
                 idempotency_key=admission.operation_id if admission is not None else None,
                 transaction_guard=publish_review,
                 suite_design_proof=proof,
-                **({"preserve_test_case_rows": True} if sync_review else {}),
+                **({"preserve_test_case_rows": True} if sync_review or reassess_proof else {}),
             )
     except Exception:
         stopped = admission is None

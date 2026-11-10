@@ -35,6 +35,8 @@ Saved progress / recovery         [Approve scope and prepare scenarios]
 
 Use the existing requirement and scenario workbenches as sections before composing a common reader. The primary action changes with the current decision: approve scope and prepare scenarios, approve scenarios and generate tests, review saved suite, or improve selected tests. The operation/status area shows the specific committed decision, queued work, or recovery state. Do not combine current and historical evidence into one row.
 
+In the bounded Review workflow, a previously verified suite can need a new assessment when its current sources and saved case versions still match. **Review saved suite** uses those exact cases and saves a new assessment under the existing project admission controls. The original assessment remains available in history.
+
 ## Deliver
 
 ```text
