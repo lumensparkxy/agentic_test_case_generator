@@ -3969,7 +3969,10 @@ export default function App() {
 			if (!data || typeof data !== "object" || Array.isArray(data)) {
 				throw new Error("Preview response did not include candidate data.");
 			}
-			const normalizedPreview = storeExecutionPreview(data, { source: "live" });
+			const normalizedPreview = storeExecutionPreview(
+				{ ...data, previewRequestId: persistProject ? attempt.id : null },
+				{ source: "live" }
+			);
 			setExecutionRunResult(null);
 			if (updateStatus) {
 				if (!normalizedPreview.isConsistent) {
@@ -4009,6 +4012,7 @@ export default function App() {
 		projectRevision: currentProjectRevision,
 		sourceSnapshotId: projectSnapshots.test_cases?.snapshot_id,
 		sourceStale: savedSuiteSourcesStale,
+		requireSavedPreview: PROJECT_WORKSPACES_V2,
 	});
 
 	const runApprovedExecution = async () => {
@@ -4055,6 +4059,7 @@ export default function App() {
 			const payload = {
 				...buildExecutionPayload(testCases, { operationScope }),
 				selected_test_case_ids: executableCandidates.map((candidate) => candidate.id),
+				...(PROJECT_WORKSPACES_V2 ? { preview_request_id: preview.previewRequestId } : {}),
 			};
 			const res = await apiRequest(API_CONTRACT_ENDPOINTS.automationExecutionRun.path, {
 				method: "POST",
@@ -4067,11 +4072,19 @@ export default function App() {
 						.clone()
 						.json()
 						.catch(() => null);
+					const rejectedPreview = problem?.detail?.code === "execution_preview_rejected";
 					const rejectedBeforeLaunch =
-						problem?.detail?.readiness?.run_allowed === false || problem?.detail?.code === "execution_selection_rejected";
+						rejectedPreview ||
+						problem?.detail?.readiness?.run_allowed === false ||
+						problem?.detail?.code === "execution_selection_rejected";
 					if (rejectedBeforeLaunch && isProjectOperationCurrent(operationScope)) {
 						saveExecutionRecovery(null);
 						outcomeUnconfirmed = false;
+						if (rejectedPreview) {
+							setExecutionPreview((current) =>
+								current === preview ? { ...current, requiresRefresh: true, consistencyMessage: problem.detail.message } : current
+							);
+						}
 					}
 				}
 				const errorMessage = await parseApiError(res, "Failed to run execution candidates");

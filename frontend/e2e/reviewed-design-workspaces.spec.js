@@ -1055,15 +1055,31 @@ test.describe("Exact suite evidence across Review and Deliver", () => {
 			expect(body.test_cases.map((savedCase) => savedCase.id)).toEqual(savedCases.map((savedCase) => savedCase.id));
 			return body;
 		};
+		const previewRequests = [];
 		await page.route("**/automation/execution/preview", (route) => {
 			checkExecutionRequest(route);
+			previewRequests.push(route.request().headers()["x-request-id"]);
 			project.current_revision += 1;
 			return route.fulfill({ json: previewResponse() });
 		});
 		const selections = [];
+		const runPreviews = [];
+		let rejectPreview = false;
 		await page.route("**/automation/execution/run", (route) => {
 			const body = checkExecutionRequest(route);
 			selections.push(body.selected_test_case_ids);
+			runPreviews.push(body.preview_request_id);
+			if (rejectPreview) {
+				return route.fulfill({
+					status: 409,
+					json: {
+						detail: {
+							code: "execution_preview_rejected",
+							message: "The saved execution preview changed. Preview the current target and suite again.",
+						},
+					},
+				});
+			}
 			project.current_revision += 1;
 			return route.fulfill({
 				json: {
@@ -1129,11 +1145,20 @@ test.describe("Exact suite evidence across Review and Deliver", () => {
 		await expect(page.getByText("Execution passed: 1 passed, 0 failed, 0 invalid.", { exact: true })).toBeVisible();
 		await expect(selectSubmit).toBeChecked();
 		expect(selections).toEqual([[submit.id]]);
+		expect(runPreviews).toEqual([previewRequests[0]]);
 		await expect(preview).toBeEnabled();
 		await preview.press("Enter");
 		await expectUnselectedPreview();
-		expect(selections).toEqual([[submit.id]]);
-		expect(writes).toEqual([previewPost, "POST /automation/execution/run", previewPost]);
+		await selectSubmit.check();
+		rejectPreview = true;
+		await runOne.press("Enter");
+		await expect(page.getByText(/^Execution run failed: The saved execution preview changed/)).toBeVisible();
+		await expect(page.getByRole("region", { name: "Execution request recovery", exact: true })).toHaveCount(0);
+		await expect(selectSubmit).toBeDisabled();
+		await expect(preview).toBeEnabled();
+		expect(selections).toEqual([[submit.id], [submit.id]]);
+		expect(runPreviews).toEqual(previewRequests);
+		expect(writes).toEqual([previewPost, "POST /automation/execution/run", previewPost, "POST /automation/execution/run"]);
 		expect(errors).toEqual([]);
 	});
 

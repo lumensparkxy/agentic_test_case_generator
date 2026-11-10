@@ -50,6 +50,8 @@ In the bounded Review workflow, a previously verified suite can need a new asses
 Preview can classify saved cases after a source change. Browser tests blocks
 Run while the suite's source evidence is stale and explains that the suite
 needs to be refreshed and reviewed.
+Run uses the current saved preview for the selected cases and target. If the
+target or compiled candidates change, review a fresh preview before running.
 
 ```text
 Projects / Mercury Checkout       Saved suite v2 · current source

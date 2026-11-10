@@ -1403,6 +1403,25 @@ class ExecutionServiceTests(unittest.TestCase):
         runner.assert_called_once()
         self.assertEqual(len(runner.call_args.args[0]), 2)
 
+    def test_verified_preview_runs_only_the_exact_candidate_id(self) -> None:
+        cases = [_browser_case(), _browser_case("tc_001")]
+        with tempfile.TemporaryDirectory() as temp_dir:
+            settings = _settings(Path(temp_dir))
+            preview = preview_execution(cases, settings=settings)
+            first, second = preview.executable
+            self.assertEqual(first.id, second.source_test_case_id)
+            with (
+                patch("app.services.execution_service.preview_execution") as compiler,
+                patch("app.services.execution_service.run_local_playwright_specs", side_effect=_fake_batch_run({first.id: "passed"})) as runner,
+            ):
+                outcome = run_execution(cases, selected_test_case_ids=[first.id], settings=settings, verified_preview=preview)
+
+        compiler.assert_not_called()
+        runner.assert_called_once()
+        self.assertEqual(len(runner.call_args.args[0]), 1)
+        self.assertEqual([item.source_test_case_id for item in outcome.results], [first.source_test_case_id])
+        self.assertEqual(outcome.summary.passed, 1)
+
     def test_run_compiles_documentation_url_assertion_before_invoking_runner(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

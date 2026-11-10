@@ -85,6 +85,7 @@ class ExecutionPreviewResponse(BaseModel):
 
 class ExecutionRunInput(ExecutionPreviewInput):
     selected_test_case_ids: List[str] = Field(default_factory=list)
+    preview_request_id: Optional[str] = Field(default=None, min_length=1, max_length=160)
 
 
 ExecutionCaseStatus = Literal["passed", "failed", "flaky", "invalid", "skipped"]

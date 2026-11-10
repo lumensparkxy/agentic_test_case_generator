@@ -87,13 +87,23 @@ class ExecutionTargetChromiumTests(unittest.TestCase):
                 _case("rebased", f"{source}/rebased?case=source#detail", (f'URL is exactly "{source}/rebased?case=source#detail"', "")),
                 _case("same_redirect", "/same-redirect", (f'URL is exactly "{target}/relative?case=inside"', "")),
             ]
-            passed = run_execution(allowed, target_base_url=target, source_app_url=source, settings=settings)
+            reviewed_cases = [*allowed, _case("unselected", "/unselected")]
+            reviewed = preview_execution(reviewed_cases, target_base_url=target, source_app_url=source, settings=settings)
+            passed = run_execution(
+                reviewed_cases,
+                target_base_url=target,
+                source_app_url=source,
+                selected_test_case_ids=[candidate.id for candidate in reviewed.executable if candidate.source_test_case_id != "unselected"],
+                settings=settings,
+                verified_preview=reviewed,
+            )
             self.assertEqual(passed.status, "passed", [(item.id, item.status, item.issues, item.stderr) for item in passed.results])
             self.assertEqual(passed.summary.passed, 4)
             self.assertIn(("GET", "/rebased?case=source"), requests["selected"])
             self.assertIn(("GET", "/relative?case=relative"), requests["selected"])
             self.assertIn(("GET", "/same?case=absolute"), requests["selected"])
             self.assertIn(("GET", "/relative?case=inside"), requests["selected"])
+            self.assertNotIn(("GET", "/unselected"), requests["selected"])
             self.assertEqual(requests["source"], [])
 
             unauthorized = [_case("unapproved", f"{source}/unapproved")]

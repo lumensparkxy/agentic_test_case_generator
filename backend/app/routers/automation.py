@@ -12,7 +12,7 @@ from fastapi.concurrency import run_in_threadpool
 
 from ..agents.automation_agent import generate_playwright_pom
 from ..config import get_execution_settings
-from ..services.execution_readiness import PREVIEW_SOURCE_BLOCKER_CODES, assess_execution, selected_candidates
+from ..services.execution_readiness import PREVIEW_SOURCE_BLOCKER_CODES, assess_execution, preview_has_verified_receipt, selected_candidates
 from ..services.execution_prerequisites import execution_reference_scope
 from ..services.execution_target import saved_execution_source_url
 from ..services.execution_request_service import (
@@ -287,6 +287,32 @@ def _require_execution_ready(readiness) -> None:
         raise HTTPException(status_code=409, detail={"message": "Execution prerequisites are not satisfied.", "readiness": readiness.model_dump(mode="json")})
 
 
+def _execution_preview_rejected() -> HTTPException:
+    return HTTPException(
+        409, {"code": "execution_preview_rejected", "message": "The saved execution preview changed. Preview the current target and suite again."}
+    )
+
+
+def _saved_preview_for_run(payload, project, readiness):
+    preview = project.current_snapshots.get("execution")
+    state = project.stage_state.get("execution")
+    if (
+        not preview
+        or not state
+        or state.stale
+        or state.current_snapshot_id != preview.snapshot_id
+        or preview.operation != _PREVIEW_OPERATION
+        or preview.request_id != payload.preview_request_id
+        or preview.project_revision != readiness.project_revision
+        or preview.source_snapshot_id != readiness.source_snapshot_id
+        or preview.payload.get("target_base_url") != readiness.target_base_url
+        or preview.payload.get("target_environment") != _target_environment(payload)
+        or not preview_has_verified_receipt(preview.metadata)
+    ):
+        raise _execution_preview_rejected()
+    return preview
+
+
 def _require_verified_preview_inputs(readiness):
     conflicts = [blocker for blocker in readiness.blockers if blocker.code in PREVIEW_SOURCE_BLOCKER_CODES]
     if conflicts:
@@ -477,6 +503,8 @@ async def automation_execution_run(
 ) -> ExecutionRunResponse:
     request_id = _get_request_id(request)
     tracked = bool(payload.project_id and request.headers.get("X-Request-ID"))
+    if payload.preview_request_id and not tracked:
+        raise HTTPException(422, "A project and execution request identity are required to run from a saved preview.")
     fingerprint = execution_request_fingerprint(payload) if tracked else ""
     if tracked:
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._~-]{0,159}", request_id):
@@ -502,6 +530,7 @@ async def automation_execution_run(
         settings = get_execution_settings()
         readiness = assess_execution(payload, project=project, settings=settings)
         _require_execution_ready(readiness)
+        saved_preview = _saved_preview_for_run(payload, project, readiness) if payload.preview_request_id else None
         target_base_url = readiness.target_base_url
         preview = await _execution_with_references(
             _resolve_main_callable("preview_execution", preview_execution),
@@ -512,6 +541,10 @@ async def automation_execution_run(
             settings=settings,
         )
         readiness = assess_execution(payload, project=project, settings=settings, preview=preview)
+        if saved_preview:
+            preview.readiness = readiness
+            if digest(preview.model_dump(mode="json")) != saved_preview.metadata["preview_response_fingerprint"]:
+                raise _execution_preview_rejected()
         _require_execution_ready(readiness)
         try:
             selected_ids = selected_candidates(preview, payload.selected_test_case_ids)
@@ -542,6 +575,7 @@ async def automation_execution_run(
             selected_test_case_ids=selected_ids,
             target_base_url=target_base_url,
             settings=settings,
+            verified_preview=preview if saved_preview else None,
         )
         response.preview.readiness = readiness
         if payload.project_id:

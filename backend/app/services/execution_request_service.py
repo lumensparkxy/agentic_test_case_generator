@@ -30,7 +30,8 @@ def public_execution_request(record: dict) -> ExecutionRequestReceipt:
 
 
 def execution_request_fingerprint(payload: ExecutionRunInput) -> str:
-    return sha256(payload.model_dump_json().encode()).hexdigest()
+    exclude = {"preview_request_id"} if payload.preview_request_id is None else None
+    return sha256(payload.model_dump_json(exclude=exclude).encode()).hexdigest()
 
 
 def reject_execution_replay(record: dict | None, fingerprint: str) -> None:

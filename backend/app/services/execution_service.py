@@ -320,9 +320,10 @@ def run_execution(
     target_base_url: str | None = None,
     source_app_url: str | None = None,
     settings: ExecutionSettings | None = None,
+    verified_preview: ExecutionPreviewResponse | None = None,
 ) -> ExecutionRunResponse:
     settings = settings or get_execution_settings()
-    preview = preview_execution(test_cases, target_base_url=target_base_url, source_app_url=source_app_url, settings=settings)
+    preview = verified_preview or preview_execution(test_cases, target_base_url=target_base_url, source_app_url=source_app_url, settings=settings)
     run_id = f"exec_{uuid4().hex[:12]}"
 
     if not settings.enabled:
@@ -341,10 +342,14 @@ def run_execution(
         )
 
     selected_ids = {str(case_id) for case_id in selected_test_case_ids if str(case_id).strip()}
-    executable_candidates = [
-        candidate for candidate in preview.executable if not selected_ids or candidate.source_test_case_id in selected_ids or candidate.id in selected_ids
-    ]
-    selected_non_executable = _selected_non_executable(preview, selected_ids)
+    if verified_preview is not None:
+        executable_candidates = [candidate for candidate in preview.executable if candidate.id in selected_ids]
+        selected_non_executable = []
+    else:
+        executable_candidates = [
+            candidate for candidate in preview.executable if not selected_ids or candidate.source_test_case_id in selected_ids or candidate.id in selected_ids
+        ]
+        selected_non_executable = _selected_non_executable(preview, selected_ids)
     run_root = settings.artifact_root / run_id
     specs_dir = run_root / "specs"
     ir_dir = run_root / "ir"

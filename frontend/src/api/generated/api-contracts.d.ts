@@ -530,6 +530,7 @@ export interface ExecutionRequestReceipt {
 
 export interface ExecutionRunInput {
 	base_project_revision?: number | null;
+	preview_request_id?: string | null;
 	project_id?: string | null;
 	selected_test_case_ids?: Array<string>;
 	target_base_url?: string | null;

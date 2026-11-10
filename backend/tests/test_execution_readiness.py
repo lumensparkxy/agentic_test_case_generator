@@ -449,6 +449,63 @@ class ExecutionPreviewPublicationTests(unittest.TestCase):
         self.assertIn("Execution readiness has changed", result.text)
         self.assertEqual(self.store, before)
 
+    def test_run_rejects_inputs_that_differ_from_the_exact_saved_preview(self):
+        reviewed = self.post()
+        self.assertEqual(reviewed.status_code, 200, reviewed.text)
+        ready = self.project()
+        run = {
+            **self.body,
+            "base_project_revision": ready.current_revision,
+            "preview_request_id": "preview",
+            "selected_test_case_ids": ["tc_1"],
+        }
+        outcome = ExecutionRunResponse(status="passed", run_id="bound-run", preview=preview_fixture())
+        with (
+            patch("app.main.run_execution", return_value=outcome) as runtime,
+            patch.object(routes, "publish_execution_outcome", return_value=SimpleNamespace(run_record_id="saved-run", historical=False)),
+        ):
+            for key, change in (
+                ("wrong-target", {"target_base_url": "https://other.example.test/"}),
+                ("wrong-environment", {"target_environment": "different"}),
+                ("missing-preview", {"preview_request_id": "not-published"}),
+            ):
+                with self.subTest(key=key):
+                    result = self.http.post("/automation/execution/run", headers={"X-Request-ID": key}, json={**run, **change})
+                    self.assertEqual(result.status_code, 409, result.text)
+                    self.assertEqual(result.json()["detail"]["code"], "execution_preview_rejected")
+                    runtime.assert_not_called()
+            self.compiler.assert_called_once()
+
+            def change_candidate(*args, **kwargs):
+                preview = routes.preview_execution(*args, **kwargs)
+                preview.executable[0].spec["steps"][0] = 'Given I open "/other"'
+                return preview
+
+            self.compiler.side_effect = change_candidate
+            changed = self.http.post("/automation/execution/run", headers={"X-Request-ID": "changed-candidate"}, json=run)
+            self.assertEqual(changed.status_code, 409, changed.text)
+            self.assertEqual(changed.json()["detail"]["code"], "execution_preview_rejected")
+            self.compiler.side_effect = None
+            runtime.assert_not_called()
+            self.assertFalse(any("/execution_requests/" in path for path in self.store))
+            self.assertEqual(self.project(), ready)
+
+            allowed = self.http.post("/automation/execution/run", headers={"X-Request-ID": "bound-current"}, json=run)
+            self.assertEqual(allowed.status_code, 200, allowed.text)
+            runtime.assert_called_once()
+            self.assertEqual(runtime.call_args.kwargs["selected_test_case_ids"], ["tc_1"])
+            verified = runtime.call_args.kwargs["verified_preview"]
+            self.assertEqual(verified.readiness.source_snapshot_id, self.suite.snapshot_id)
+            self.assertEqual(verified.model_dump(mode="json"), reviewed.json())
+
+            replay = self.http.post("/automation/execution/run", headers={"X-Request-ID": "bound-current"}, json=run)
+            self.assertEqual(replay.json()["detail"]["code"], "execution_request_exists")
+            conflict = self.http.post(
+                "/automation/execution/run", headers={"X-Request-ID": "bound-current"}, json={**run, "preview_request_id": "another-preview"}
+            )
+            self.assertEqual(conflict.json()["detail"]["code"], "execution_request_conflict")
+            runtime.assert_called_once()
+
     def test_preview_rejects_forged_missing_revision_archived_and_foreign_inputs_before_compiling(self):
         self.assertEqual(self.post(test_cases=[{**self.cases[0], "automation_status": "Manual"}]).status_code, 409)
         self.assertEqual(self.post(base_project_revision=None).status_code, 409)
