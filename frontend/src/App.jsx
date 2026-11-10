@@ -4544,13 +4544,24 @@ export default function App() {
 		apply_update: testCaseActionDisabled,
 	};
 	const exportEvidenceKey = `${currentProjectId}:${projectSnapshots.test_cases?.snapshot_id}:${currentProjectRevision}`;
+	const latestSuiteHumanReview = testCaseStageState.metadata?.latest_human_review;
+	const humanSuiteChangesRequested =
+		exactSuiteQuality?.human_acceptance === "changes_requested" ||
+		(exactSavedSuiteId &&
+			latestSuiteHumanReview?.snapshot_id === exactSavedSuiteId &&
+			latestSuiteHumanReview.decision === "request_changes");
+	const savedSuiteExportBlocker = humanSuiteChangesRequested
+		? "Human review requested changes to this saved suite."
+		: savedProofNeedsReassessment
+			? "The saved design needs reassessment."
+			: "";
 	const declaredBrowserSetup =
 		suiteQuality && [PROJECT_DESTINATIONS.REPORTS, PROJECT_DESTINATIONS.AUTOMATION].includes(route.destination)
 			? getCurrentDeclaredBrowserSetup(currentProject)
 			: null;
 	const reviewedDesignAvailable = Boolean(
 		suiteQuality &&
-		!savedProofNeedsReassessment &&
+		!savedSuiteExportBlocker &&
 		currentProject?.design_delivery_enabled === true &&
 		currentProject.reviewed_design_available === true &&
 		!testCaseStageState.stale &&
@@ -4594,7 +4605,7 @@ export default function App() {
 	) : null;
 	const exportReviewApproved = Boolean(
 		exportDraftRequiredFor !== exportEvidenceKey &&
-		!savedProofNeedsReassessment &&
+		!savedSuiteExportBlocker &&
 		testCaseReview?.approved &&
 		projectStageState.test_cases?.approved &&
 		!projectStageState.test_cases?.stale &&
@@ -7273,7 +7284,7 @@ export default function App() {
 											navigate={navigate}
 											request={apiRequest}
 											exportReviewApproved={exportReviewApproved}
-											savedProofNeedsReassessment={savedProofNeedsReassessment}
+											savedSuiteExportBlocker={savedSuiteExportBlocker}
 											exportRequiresOverride={exportRequiresOverride}
 											exportGateLocked={exportGateLocked}
 											draftExportOverrideRequested={draftExportOverrideRequested}

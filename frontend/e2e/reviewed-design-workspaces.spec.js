@@ -34,6 +34,7 @@ async function setup(
 		browserExecution = false,
 		supersedeExport = false,
 		reassessment = false,
+		suiteHumanReview,
 	} = {}
 ) {
 	const project = useCaseProjectFixture({ name: "Verified checkout design" });
@@ -74,7 +75,7 @@ async function setup(
 	};
 	const sourceIds = { requirements: project.current_snapshots.requirements.snapshot_id, use_cases: plan.snapshot_id };
 	const metadata = { source_snapshot_ids: sourceIds, source_use_case_snapshot_id: plan.snapshot_id };
-	const legacyApproved = browserExecution || reassessment;
+	const legacyApproved = browserExecution || reassessment || Boolean(suiteHumanReview);
 	project.current_snapshots.test_cases = {
 		snapshot_id: suiteId,
 		project_id: project.project_id,
@@ -106,6 +107,17 @@ async function setup(
 		},
 	};
 	project.stage_state.test_cases = { current_snapshot_id: suiteId, version: 2, stale, approved: legacyApproved, metadata };
+	const humanChangesRequested = suiteHumanReview === "current" || suiteHumanReview === "legacy";
+	if (suiteHumanReview) {
+		project.stage_state.test_cases.metadata = {
+			...metadata,
+			latest_human_review: {
+				snapshot_id: humanChangesRequested ? suiteId : "earlier-checkout-suite",
+				decision: "request_changes",
+				...(suiteHumanReview === "legacy" ? {} : { review_id: "suite-review", reviewer_user_id: project.owner_user_id }),
+			},
+		};
+	}
 	const historicalRun = workspaceRunFixture({
 		project_id: project.project_id,
 		run_id: "checkout-run-before-repair",
@@ -188,7 +200,7 @@ async function setup(
 	if (!oldServer) {
 		const complete = available && !stale && !reassessment;
 		project.design_delivery_enabled = true;
-		project.reviewed_design_available = complete;
+		project.reviewed_design_available = complete && !humanChangesRequested;
 		project.suite_quality = {
 			suite_snapshot_id: suiteId,
 			source_freshness: stale ? "stale" : available || reassessment ? "current" : "unknown",
@@ -196,7 +208,7 @@ async function setup(
 			scenario_decision: "approved",
 			scenario_snapshot_id: plan.snapshot_id,
 			scenario_review_id: "review-current-checkout-plan",
-			human_acceptance: "unavailable",
+			human_acceptance: suiteHumanReview === "current" ? "changes_requested" : "unavailable",
 			declared_setup: "blocked",
 			required_requirement_ids: ["REQ-101"],
 			deferred_requirement_ids: ["REQ-202"],
@@ -293,6 +305,7 @@ async function setup(
 					source_snapshot_ids: { ...sourceIds, test_cases: suiteId },
 					exported_at: "2026-07-17T12:35:00Z",
 					draft_override_reason: publishedReport.payload.draft_override_reason,
+					human_review_status: humanChangesRequested ? "changes_requested" : "unavailable",
 					case_versions: [{ case_id: caseId, case_version_id: testCase.artifact_version_id, case_version_number: 2 }],
 				},
 			},
@@ -355,7 +368,11 @@ async function setup(
 					snapshot_id: suiteId,
 					is_draft: draft,
 					...(draft
-						? { draft_override_reason: body.draft_override_reason, machine_review_status: "unavailable" }
+						? {
+								draft_override_reason: body.draft_override_reason,
+								machine_review_status: reassessment ? "unavailable" : "approved",
+								human_review_status: humanChangesRequested ? "changes_requested" : "unavailable",
+							}
 						: { design_delivery: { delivery_kind: "reviewed_design", declared_setup: "blocked" } }),
 				},
 			},
@@ -370,6 +387,63 @@ const exportDesign = (page) => page.getByRole("button", { name: "Export reviewed
 
 test.describe("Exact suite evidence across Review and Deliver", () => {
 	test.skip(!v2, "Requires the opt-in project workspaces");
+
+	test("requires a reasoned draft after human changes to the exact saved suite", async ({ page }, testInfo) => {
+		const { errors, exportRequests, writes, testCase, reportReads } = await setup(page, { suiteHumanReview: "current" });
+		await page.setViewportSize({ width: 1440, height: 900 });
+		await page.goto(`${root}/review/tests`);
+		const overview = quality(page).locator("summary").first();
+		await expect(overview).toContainText("Independent design Complete");
+		await expect(overview).toContainText("Human suite acceptance Changes requested");
+		await expect(page.getByText("Export blocked", { exact: true })).toBeVisible();
+		await expect(page.getByRole("region", { name: "Selected test case", exact: true })).toContainText(testCase.steps[0].expected);
+		await expect(page.getByText("Loading project recommendations...", { exact: true })).toHaveCount(0);
+		await page.screenshot({ path: testInfo.outputPath("review-human-changes.png") });
+
+		await page.getByRole("navigation", { name: "Project workspaces" }).getByRole("link", { name: "Deliver", exact: true }).press("Enter");
+		await expect(page).toHaveURL(`${root}/deliver`);
+		const json = page.getByRole("button", { name: "JSON API/Import ready", exact: true });
+		await expect(quality(page)).toContainText(/Independent design\s*Complete/);
+		await expect(quality(page)).toContainText(/Human suite acceptance\s*Changes requested/);
+		await expect(page.getByText("Human review requested changes to this saved suite.", { exact: false })).toBeVisible();
+		await expect(page.getByText("Approved for export", { exact: true })).toHaveCount(0);
+		await expect(exportDesign(page)).toHaveCount(0);
+		await expect(json).toBeDisabled();
+		await expect(page.getByRole("link", { name: "Open test review", exact: true })).toHaveAttribute("href", `${root}/review/tests`);
+		await page.screenshot({ path: testInfo.outputPath("deliver-human-changes-draft.png") });
+
+		await page.getByRole("checkbox", { name: "Export draft anyway", exact: true }).check();
+		await expect(json).toBeDisabled();
+		expect(writes).toEqual([]);
+		const reason = "Share the exact cases for the requested changes.";
+		await page.getByRole("textbox", { name: "Reason for exporting this draft", exact: true }).fill(reason);
+		const downloadPromise = page.waitForEvent("download");
+		await json.press("Enter");
+		const download = await downloadPromise;
+		const file = JSON.parse(await readFile(await download.path(), "utf8"));
+		expect(file.audit_metadata).toMatchObject({
+			snapshot_id: suiteId,
+			is_draft: true,
+			machine_review_status: "approved",
+			human_review_status: "changes_requested",
+		});
+		expect(file.test_cases[0].steps).toEqual(testCase.steps);
+		expect(exportRequests).toHaveLength(1);
+		expect(exportRequests[0].body).toMatchObject({
+			approved: false,
+			source_snapshot_id: suiteId,
+			draft_override_requested: true,
+			draft_override_reason: reason,
+		});
+		expect(exportRequests[0].body).not.toHaveProperty("delivery_intent");
+		await page.getByRole("link", { name: "Open saved report for this download", exact: true }).press("Enter");
+		await expect(page.getByRole("heading", { name: "Saved file report", exact: true })).toBeVisible();
+		await expect(page.getByText("Draft", { exact: true })).toBeVisible();
+		await expect(page.getByText(reason, { exact: true })).toBeVisible();
+		expect(reportReads).toContain(reportId);
+		expect(writes).toEqual(["POST /export/json"]);
+		expect(errors).toEqual([]);
+	});
 
 	test("delivers a reasoned draft when the exact saved design needs reassessment", async ({ page }, testInfo) => {
 		const { errors, exportRequests, writes, testCase, reportReads } = await setup(page, { reassessment: true });
@@ -893,6 +967,31 @@ test.describe("Exact suite evidence across Review and Deliver", () => {
 			expect(errors).toEqual([]);
 		});
 	}
+});
+
+test("respects an older exact requested-changes record without a quality projection", { tag: "@p1" }, async ({ page }) => {
+	const { errors, writes } = await setup(page, { suiteHumanReview: "legacy", oldServer: true });
+	await page.goto(v2 ? `${root}/deliver` : `${root}/reports`);
+	await expect(page.getByText("Human review requested changes to this saved suite.", { exact: false })).toBeVisible();
+	await expect(page.getByRole("button", { name: "JSON API/Import ready", exact: true })).toBeDisabled();
+	await expect(page.getByRole("checkbox", { name: "Export draft anyway", exact: true })).toBeVisible();
+	expect(writes).toEqual([]);
+	expect(errors).toEqual([]);
+});
+
+test("keeps the current suite export available after an earlier request for changes", { tag: "@p1" }, async ({ page }) => {
+	const { errors, writes } = await setup(page, { suiteHumanReview: "earlier" });
+	await page.goto(v2 ? `${root}/deliver` : `${root}/reports`);
+	if (v2) {
+		await expect(quality(page)).toContainText(/Human suite acceptance\s*Unavailable/);
+		await expect(exportDesign(page)).toBeEnabled();
+	} else {
+		await expect(page.getByText("Approved for export", { exact: true })).toBeVisible();
+		await expect(page.getByRole("button", { name: "JSON API/Import ready", exact: true })).toBeEnabled();
+	}
+	await expect(page.getByRole("checkbox", { name: "Export draft anyway", exact: true })).toHaveCount(0);
+	expect(writes).toEqual([]);
+	expect(errors).toEqual([]);
 });
 
 test("flag-off keeps the existing draft export gate despite server evidence", { tag: "@p1" }, async ({ page }) => {

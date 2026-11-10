@@ -26,7 +26,7 @@ export default function ExportPanel({
 	navigate,
 	request,
 	exportReviewApproved,
-	savedProofNeedsReassessment,
+	savedSuiteExportBlocker,
 	exportRequiresOverride,
 	exportGateLocked,
 	draftExportOverrideRequested,
@@ -117,8 +117,8 @@ export default function ExportPanel({
 						<p>
 							{reviewedDesignAvailable
 								? "Download the saved suite with its design assessment, source evidence, and separate browser setup status."
-								: savedProofNeedsReassessment
-									? "The saved design needs reassessment. Provide a reason to export the current cases as a draft."
+								: savedSuiteExportBlocker
+									? `${savedSuiteExportBlocker} Provide a reason to export the current cases as a draft.`
 									: exportRequiresOverride
 										? testCaseReview?.approved
 											? "The suite is incomplete or its saved approval is unavailable. Provide a reason to export this draft."
@@ -127,7 +127,7 @@ export default function ExportPanel({
 											? testCaseReview?.summary || "The latest generated test cases passed the review gate."
 											: "No review decision is available for this export."}
 						</p>
-						{savedProofNeedsReassessment && backToTestsPath && (
+						{savedSuiteExportBlocker && backToTestsPath && (
 							<RouteLink to={backToTestsPath} navigate={navigate}>
 								Open test review
 							</RouteLink>

@@ -106,6 +106,7 @@ export default function SuiteQualitySummary({
 							<strong>Saved suite quality</strong>
 							<span>Independent design {designStatus}</span>
 							<span>Source freshness {sourceFreshness}</span>
+							{quality?.human_acceptance === "changes_requested" && <span>Human suite acceptance {QUALITY_LABELS.changes_requested}</span>}
 						</span>
 					</summary>
 					{details}

@@ -84,3 +84,7 @@ The draft marks machine review as unavailable and retains the saved case
 versions. An earlier report keeps the classification and evidence recorded
 at export time. Retrying its download still requires the original evidence
 to satisfy current file admission.
+
+A request for changes to the exact current suite also requires a reasoned
+draft. Review and Deliver keep independent design status visible alongside
+the human decision. A decision on an earlier suite stays with that suite.
