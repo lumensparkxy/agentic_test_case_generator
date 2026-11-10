@@ -935,6 +935,45 @@ class ExecutionServiceTests(unittest.TestCase):
         value_steps[-1].pop("expected")
         self.assertTrue(validate_ir_document(ir.raw))
 
+    def test_leave_blank_uses_the_matching_empty_value_assertion_without_filling(self) -> None:
+        target = "https://example.test/"
+        case = _browser_case("TC-BLANK")
+        case.steps = [
+            TestStep(step=1, action=f'Open "{target}"', expected=""),
+            TestStep(step=2, action='Leave "Attendees" blank', expected='field "Attendees" value should equal ""'),
+            TestStep(step=3, action='Click exact button "Book"', expected=""),
+        ]
+        original = case.model_copy(deep=True)
+        response = preview_execution([case], target_base_url=target)
+        self.assertEqual(response.summary.executable, 1)
+        ir = compile_parsed_spec(parse_spec_document(response.executable[0].spec), environment=ResolvedEnvironment("web", {"baseUrl": target}, target, None))
+        steps = ir.raw["cases"][0]["steps"]
+        self.assertEqual([step["action"] for step in steps], ["navigate", "assert_value_equals", "click"])
+        self.assertEqual(steps[1]["locator"], {"strategy": "label", "value": "Attendees", "exact": True})
+        self.assertEqual(steps[1]["expected"], "")
+        generated = generate_playwright_spec(ir).contents
+        self.assertIn('await expect(page.getByLabel("Attendees", { exact: true })).toHaveValue("");', generated)
+        self.assertNotIn(".fill(", generated)
+        self.assertEqual(case, original)
+
+    def test_leave_blank_rejects_incomplete_mismatched_or_compound_checks(self) -> None:
+        for action, expected in (
+            ('Leave "Attendees" blank', ""),
+            ('Leave "Attendees" blank', 'field "Room" value should equal ""'),
+            ('Leave field "Attendees" empty', 'field "Attendees" value should equal " "'),
+            ('Leave "Attendees" blank', 'field "Attendees" value should equal "" and save the result'),
+            ('Leave "Attendees" blank; click "Book"', 'field "Attendees" value should equal ""'),
+            ('Leave the field "Attendees" blank; click "Book"', 'field "Attendees" value should equal ""'),
+            ('Please leave “Attendees” blank; click "Book"', 'field "Attendees" value should equal ""'),
+        ):
+            with self.subTest(action=action, expected=expected):
+                case = _browser_case("TC-BLANK")
+                case.steps = [TestStep(step=1, action=action, expected=expected)]
+                response = preview_execution([case], target_base_url="https://example.test")
+                self.assertEqual(response.summary.executable, 0)
+                self.assertEqual(response.summary.unsupported, 1)
+                self.assertEqual(response.unsupported[0].unsupported_steps[0].expected, expected)
+
     def test_scoped_text_checks_compile_to_exact_single_locator_assertions(self) -> None:
         case = _browser_case()
         case.steps = [

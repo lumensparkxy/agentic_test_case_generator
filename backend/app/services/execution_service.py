@@ -80,6 +80,8 @@ QUOTED_FILL_ACTION = re.compile(
     rf"""|(?:the\s+)?(?P<label>{QUOTED_FILL_LITERAL}|[^"'\r\n]+?)(?:\s+field)?)\.?""",
     re.IGNORECASE,
 )
+LEAVE_FIELD_INTENT = re.compile(r"^(?:please\s+)?leave\b", re.IGNORECASE)
+LEAVE_BLANK_ACTION = re.compile(rf"leave\s+(?:field\s+)?(?P<label>{QUOTED_FILL_LITERAL})\s+(?:blank|empty)\.?", re.IGNORECASE)
 STEP_DATA_FILL_INTENT = re.compile(r"\b(?:enter|fill|type|input)\s+(?:step\s+data|browser\s+sample)\b", re.IGNORECASE)
 STEP_DATA_FILL_ACTION = re.compile(rf"(?:enter|fill|type|input)\s+step\s+data\s+into\s+field\s+(?P<label>{QUOTED_FILL_LITERAL})\.?", re.IGNORECASE)
 STEP_DATA_ASSERTION = re.compile(
@@ -618,8 +620,11 @@ def _convert_step(step: TestStep, *, base_url: str) -> tuple[list[_ConvertedStep
     exact_radio = EXACT_RADIO_ACTION.fullmatch(raw_action)
     exact_checkbox = EXACT_CHECKBOX_ACTION.fullmatch(raw_action)
     quoted_fill = QUOTED_FILL_ACTION.fullmatch(raw_action)
+    leave_blank = LEAVE_BLANK_ACTION.fullmatch(raw_action)
     # A supported assertion's quoted locator and value are data, not operations.
-    action_is_literal = data_action or action_value or exact_click or exact_select or exact_radio or exact_checkbox or _is_literal_assertion(action_assertion)
+    action_is_literal = (
+        data_action or action_value or exact_click or exact_select or exact_radio or exact_checkbox or leave_blank or _is_literal_assertion(action_assertion)
+    )
     expected_is_literal = data_expectation or expected_value or _is_literal_assertion(expected_assertion)
     domain_action = "" if action_is_literal else step.action
     if quoted_fill or data_fill:
@@ -633,6 +638,14 @@ def _convert_step(step: TestStep, *, base_url: str) -> tuple[list[_ConvertedStep
             "unsupported_field_value_assertion",
             'Use field "Employee name" value should equal "Alex" with an exact label and value, or keep the check manual.',
         )
+
+    if LEAVE_FIELD_INTENT.match(action):
+        label = _assertion_literal(leave_blank["label"]) if leave_blank else ""
+        empty_value = _ConvertedStep("assert_value_equals", f'field "{_escape_step_text(label)}" value should equal ""')
+        if not label.strip() or expected_value != empty_value:
+            return [], _unmapped_step(step, action, is_expected=False)
+        # Leaving an input untouched is an observation, with no fill or clear.
+        return [empty_value], None
 
     if action_value:
         converted.append(action_value)

@@ -117,8 +117,10 @@ Then css "#employee-name" value should equal "Alex Rivera"
 Then test id "employee-name" value should equal "Alex Rivera"
 ```
 
-Use an empty quoted value to check a blank field. Substring checks require a
-nonempty literal. Both compile to Playwright value assertions. Use
+Use an empty quoted value to check a blank field. A source step with action
+`Leave "Employee name" blank` and expected result
+`field "Employee name" value should equal ""` checks the exact field without
+changing its value. Substring checks require a nonempty literal. Both compile to Playwright value assertions. Use
 `Enter "literal input" into field "Employee name"` for an exact fill and
 `Enter "" into field "Employee name"` to clear a populated field. Quoted input
 preserves spaces, including at the edges. Escape embedded double quotes and
