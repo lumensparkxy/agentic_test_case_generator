@@ -24,6 +24,12 @@ async function fixture(page, count = 50, project = useCaseProjectFixture()) {
 }
 const path = (stage) => `/projects/${USE_CASE_PROJECT_ID}/${stage}`;
 
+async function openCaseReport(page, number) {
+	await page.getByRole("tab", { name: /^Generated Test Cases/ }).press("Enter");
+	await page.getByRole("button", { name: `TC-${number} Checkout ${number}`, exact: true }).press("Enter");
+	await page.getByRole("button", { name: "Report a problem", exact: true }).press("Enter");
+}
+
 for (const width of [1366, 1440, 1920])
 	test(
 		`desktop recovery preserves selection, search and list scroll at ${width}`,
@@ -248,11 +254,6 @@ test(
 		const suiteApply = panel.getByRole("button", { name: "Apply improvements", exact: true });
 		const returnToSuite = panel.getByRole("button", { name: "Return to suite improvements", exact: true });
 		const improve = page.getByRole("tab", { name: /^Improve tests/ });
-		const openReport = async (number) => {
-			await page.getByRole("tab", { name: /^Generated Test Cases/ }).press("Enter");
-			await page.getByRole("button", { name: `TC-${number} Checkout ${number}`, exact: true }).press("Enter");
-			await page.getByRole("button", { name: "Report a problem", exact: true }).press("Enter");
-		};
 		await improve.press("Enter");
 		await expect(caseInstructions).toHaveValue(firstCaseNote);
 		await returnToSuite.press("Enter");
@@ -261,7 +262,7 @@ test(
 		await suiteInstructions.scrollIntoViewIfNeeded();
 		await page.screenshot({ path: testInfo.outputPath("empty-suite-draft.png") });
 		await suiteInstructions.fill(suiteNote);
-		await openReport(2);
+		await openCaseReport(page, 2);
 		await expect(caseInstructions).toHaveValue("");
 		await caseInstructions.fill(secondCaseNote);
 		await returnToSuite.press("Enter");
@@ -269,9 +270,9 @@ test(
 		await page.reload();
 		await improve.press("Enter");
 		await expect(suiteInstructions).toHaveValue(suiteNote);
-		await openReport(1);
+		await openCaseReport(page, 1);
 		await expect(caseInstructions).toHaveValue(firstCaseNote);
-		await openReport(2);
+		await openCaseReport(page, 2);
 		await expect(caseInstructions).toHaveValue(secondCaseNote);
 		expect(requests).toEqual([]);
 		await panel.getByRole("button", { name: "Repair selected test", exact: true }).press("Enter");
@@ -291,6 +292,76 @@ test(
 		await expect(panel.getByText(secondCaseNote, { exact: false })).toHaveCount(0);
 	}
 );
+
+test("keeps repair failures with their submitted draft when the reviewer switches reports", { tag: "@p1" }, async ({ page }, testInfo) => {
+	const { project, api } = await fixture(page, 2);
+	const firstNote = "Assert the existing receipt for TC-1.";
+	const secondNote = "Check the denial banner in TC-2.";
+	const suiteNote = "Use consistent wording across the suite.";
+	const requests = [];
+	let releaseFailure;
+	const pendingFailure = new Promise((resolve) => {
+		releaseFailure = resolve;
+	});
+	await page.route("**/testcases/refine", async (route) => {
+		requests.push(route.request().postDataJSON());
+		if (requests.length === 1) {
+			await pendingFailure;
+			return route.fulfill({ status: 503, json: { detail: "Temporary failure for TC-1" } });
+		}
+		project.current_revision++;
+		api.setProject(project);
+		return route.fulfill({ status: 409, json: { detail: "Project revision changed" } });
+	});
+	await page.goto(path("test-cases"));
+	await page.getByRole("tab", { name: /^Improve tests/ }).press("Enter");
+	const panel = page.getByRole("region", { name: "Improve test quality" });
+	const instructions = panel.getByRole("textbox", { name: "What is wrong with this test?", exact: true });
+	const suiteInstructions = panel.getByRole("textbox", { name: "Additional instructions (optional)", exact: true });
+	const repair = panel.getByRole("button", { name: "Repair selected test", exact: true });
+	await suiteInstructions.fill(suiteNote);
+	await openCaseReport(page, 2);
+	await instructions.fill(secondNote);
+	await openCaseReport(page, 1);
+	await instructions.fill(firstNote);
+	await repair.press("Enter");
+	await expect.poll(() => requests.length).toBe(1);
+	try {
+		await openCaseReport(page, 2);
+		await expect(instructions).toHaveValue(secondNote);
+		await expect(instructions).toBeDisabled();
+	} finally {
+		releaseFailure();
+	}
+	await expect(repair).toBeEnabled();
+	await expect.soft(panel.getByRole("alert")).toHaveCount(0, { timeout: 5000 });
+	await openCaseReport(page, 1);
+	await expect(panel.getByRole("alert")).toContainText("Temporary failure for TC-1");
+	await expect(instructions).toHaveValue(firstNote);
+	await repair.press("Enter");
+	await expect(panel.getByRole("alert")).toContainText("The project changed");
+	await openCaseReport(page, 2);
+	await expect.soft(panel.getByRole("alert")).toContainText("TC-1", { timeout: 5000 });
+	await expect(instructions).toHaveValue(secondNote);
+	await expect(repair).toBeDisabled();
+	await panel
+		.getByRole("region", { name: "Report a problem · TC-2" })
+		.screenshot({ path: testInfo.outputPath("scoped-revision-conflict.png") });
+	await panel.getByRole("button", { name: "Reload current findings", exact: true }).press("Enter");
+	await expect(panel.getByRole("alert")).toHaveCount(0);
+	await expect(instructions).toHaveValue(secondNote, { timeout: 5000 });
+	await expect(repair).toBeEnabled();
+	await openCaseReport(page, 1);
+	await expect(instructions).toHaveValue("");
+	await expect(repair).toBeDisabled();
+	await panel.getByRole("button", { name: "Return to suite improvements", exact: true }).press("Enter");
+	await expect(suiteInstructions).toHaveValue(suiteNote);
+	expect(requests).toHaveLength(2);
+	for (const request of requests) {
+		expect(request.selected_test_case_ids).toEqual(["TC-1"]);
+		expect(request.feedback).toContain(firstNote);
+	}
+});
 
 test("pasted requirements use reviewed file import and recover without changing source", async ({ page }) => {
 	await fixture(page);

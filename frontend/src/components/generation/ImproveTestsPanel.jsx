@@ -86,11 +86,13 @@ export default function ImproveTestsPanel({
 				`Overall expected: ${target.expected_result || "Not specified"}`,
 			].join("\n")
 		: "";
-	const [error, setError] = useState("");
-	const [conflict, setConflict] = useState(false);
+	const [failure, setFailure] = useState(null);
 	const [reloading, setReloading] = useState(false);
 	const [saved, setSaved] = useState(false);
 	const instructionsId = useId();
+	const submission = { caseId: target?.id || "", instructions, selected };
+	const conflict = failure?.conflict === true;
+	const error = conflict || failure?.submission.caseId === submission.caseId ? failure?.message : "";
 	const locked = busy || disabled || conflict || reloading;
 	const chosen = findings.filter((finding) => selected.includes(finding));
 	const canApply =
@@ -98,20 +100,20 @@ export default function ImproveTestsPanel({
 		!reviewOnly &&
 		testCases.length > 0 &&
 		(target ? Boolean(instructions.trim()) : findings.length ? chosen.length > 0 : Boolean(instructions.trim()));
-	const clearCurrentDraft = () => {
+	const clearSubmittedDraft = ({ caseId, instructions, selected }) => {
 		recovery.clear({
 			matches: (value) => {
 				const current = scopedDraft(value);
-				return target
-					? caseNote(current, target.id) === instructions
+				return caseId
+					? caseNote(current, caseId) === instructions
 					: current.instructions === instructions && JSON.stringify(current.selected) === JSON.stringify(selected);
 			},
 			retain: (value) => {
 				const current = scopedDraft(value);
-				const remaining = target
-					? { ...current, caseId: current.caseId === target.id ? "" : current.caseId, caseInstructions: { ...current.caseInstructions } }
+				const remaining = caseId
+					? { ...current, caseId: current.caseId === caseId ? "" : current.caseId, caseInstructions: { ...current.caseInstructions } }
 					: { ...current, selected: [], instructions: "" };
-				if (target) delete remaining.caseInstructions[target.id];
+				if (caseId) delete remaining.caseInstructions[caseId];
 				if (
 					remaining.caseId ||
 					remaining.instructions ||
@@ -124,26 +126,28 @@ export default function ImproveTestsPanel({
 	};
 	const apply = async () => {
 		if (!canApply) return;
-		setError("");
+		setFailure(null);
 		setSaved(false);
 		try {
 			if (
 				await onApply(
 					improvementFeedback(target ? [] : chosen, target ? `${evidence}\nReported problem: ${instructions}` : instructions),
-					target ? [target.id] : []
+					submission.caseId ? [submission.caseId] : []
 				)
 			) {
-				clearCurrentDraft();
-				if (target) onClearReport?.(target.id);
+				clearSubmittedDraft(submission);
+				if (submission.caseId) onClearReport?.(submission.caseId);
 				setSaved(true);
 			}
-		} catch (failure) {
-			setConflict(failure.status === 409);
-			setError(
-				failure.status === 409
+		} catch (requestError) {
+			const conflict = requestError.status === 409;
+			setFailure({
+				submission,
+				conflict,
+				message: conflict
 					? "The project changed. Reload the current findings before applying fixes."
-					: failure.message || "The fixes could not be applied. Your selections and instructions are kept."
-			);
+					: requestError.message || "The fixes could not be applied. Your selections and instructions are kept.",
+			});
 		}
 	};
 	const savedAssessment = grouped ? savedSuite?.payload?.substantive_assessment : null;
@@ -192,6 +196,13 @@ export default function ImproveTestsPanel({
 			{error && (
 				<div role="alert">
 					<p>{error}</p>
+					{conflict && failure.submission.caseId !== submission.caseId && (
+						<p>
+							{failure.submission.caseId
+								? `The conflict came from the report for ${failure.submission.caseId}.`
+								: "The conflict came from the suite improvements request."}
+						</p>
+					)}
 					{conflict && (
 						<Button
 							disabled={reloading || busy}
@@ -199,10 +210,11 @@ export default function ImproveTestsPanel({
 								setReloading(true);
 								try {
 									if (await onReload()) {
-										setConflict(false);
-										setError("");
-										clearCurrentDraft();
-									} else setError("The project could not be reloaded. Try reloading again before applying fixes.");
+										clearSubmittedDraft(failure.submission);
+										setFailure(null);
+									} else {
+										setFailure({ ...failure, message: "The project could not be reloaded. Try reloading again before applying fixes." });
+									}
 								} finally {
 									setReloading(false);
 								}

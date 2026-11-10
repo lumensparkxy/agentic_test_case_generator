@@ -6903,7 +6903,7 @@ export default function App() {
 																	reportedCase={reportedCase}
 																	summary={currentProject?.current_snapshots?.test_cases?.payload?.scoped_refinement}
 																	onClearReport={clearReport}
-																	key={sourceCaseSnapshot}
+																	key={JSON.stringify([currentUser?.sub, sourceCaseSnapshot])}
 																	review={testCaseReview}
 																	findings={testCaseFindings}
 																	needsOnlySetup={testCasesNeedSetup}
