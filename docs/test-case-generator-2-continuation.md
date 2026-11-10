@@ -638,15 +638,10 @@ open when the old response arrived in the separate mocked test.
 
 P8 records the [local release and rollback handoff](test-case-generator-2-release.md)
 under [#493](https://github.com/lumensparkxy/agentic_test_case_generator/issues/493).
-The initial rehearsal at `e94ce21` and repeat at `6ad1efa` each used the
-same disposable project and Chromium session across enabled, flag-off
-and restored builds. Both aliases
-preserved exact report, run, case and failed-run Context evidence. Twelve
-canonical evidence digests matched, with no API writes from the browser.
-All project records matched. The only database changes were two timestamps
-from existing entitlement reads. The separate server restart verified
-exact reviewed-design JSON replay, rejection of a fresh intent and saved
-evidence readback with server delivery disabled.
+The latest replay at `6de863c` covers the template and browser compiler
+changes. It passed the frozen seven-action Chromium journey and both local
+rollback rehearsals. The release matrix records exact evidence and the
+remaining acceptance gates.
 
 P6 blind review preparation under
 [#495](https://github.com/lumensparkxy/agentic_test_case_generator/issues/495)
@@ -734,10 +729,9 @@ kept their exact versions. The archive contains no successful original
 export. The historical fault replay is separate from the frozen paired live
 cohort. Earlier assertion failures leave downstream checks unobserved.
 
-The next externally gated actions are an authorized W05/W01 live smoke,
-independent practitioner validation, and verification of a hosted worker
-identity and timeout policy. Live provider pairs require a bounded budget
-and approved environment. Independent practitioner validation stays with
+The current scope is offline only. Live provider pairs, independent artifact
+judgments, practitioner validation, and verification of a hosted worker
+identity and timeout policy remain open. The practitioner study stays with
 [#354](https://github.com/lumensparkxy/agentic_test_case_generator/issues/354).
 [#251](https://github.com/lumensparkxy/agentic_test_case_generator/issues/251)
 retains live journey and source-change acceptance,

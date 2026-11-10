@@ -3,22 +3,30 @@
 The implementation lives on `codex/version_2_0`. The frozen baseline is
 `2f6458d3d1bb68197ba2b5572261870277c8cadb`. The phase history is in the
 [implementation record](test-case-generator-2-continuation.md). Use the
-[frozen evaluation protocol](test-case-generator-2-evaluation.md) to
-score live results. The latest locally verified application commit is
-`6ad1efab5c67d7f1745f3e5442fd56867fec51d4`. The stack remains open for
-final merge approval.
+[frozen evaluation protocol](test-case-generator-2-evaluation.md) for the
+fixed thresholds. The latest locally verified application commit is
+`6de863c4757a7c1560fafd5e0c58dcd8cf5064a0`. The stack remains open for
+final merge approval. The current evaluation scope is offline only.
 
 ## Acceptance evidence
 
 | Gate | Evidence | Open requirement |
 | --- | --- | --- |
-| Desktop effort | The frozen paired Chromium journey took seven deliberate actions against eleven, a 36.4% reduction. Both explicit approvals and four workbench transitions remained. | Human active time, completion and correction effort. |
-| Exact artifact integrity | Local Firestore and rendered checks exercised saved cases and versions, source changes, scoped repair, CSV/XLSX/JSON delivery, report and run history, and literal data. A fresh W01 rendered journey matched all eleven downloaded cases to their exact saved versions. The frozen W11 rehearsal admitted four exact 13-case exports from both pins and both source checkpoints into blinded intake. | The full live 36-pair artifact cohort. |
-| Durable decisions and recovery | Isolated Firestore verified exact approval, response loss, cancellation, release and stale fences. Eight forced worker stops verified natural lease expiry, replay of known unstarted work, explicit interrupted status and exact saved artifact recovery for both stages. The material 8→6 local replay preserved exact unaffected cases and reapproved the revised plan. The rendered W01 dialog restored focus on the exact saved decision before the delayed acknowledgement arrived. | Hosted worker identity, dispatch timeouts and shared producer admission in an authorized environment. |
-| Grounded design and quality | The two-workflow native SDK rehearsal completed four arms with authored responses and exact JSON comparison. Local repair retained prior assertions and appended a checked observation. | Authorized live pairs, independent adjudication, generated-case healthy and fault gates, and runtime cost and latency. |
-| Browser execution | Four authored controls passed on healthy targets and all five seeded faults failed at the intended saved assertion through the actual app/runtime. The rendered Deliver path separately verified deliberate selection, failed evidence, the exact original case, and zero executable candidates. | Applicable generated cases on the frozen targets. |
-| Rollback | A same-project Chromium session exercised enabled, compatible legacy and restored bundles, with exact case, run, Context finding and historical report links. All twelve canonical public evidence digests matched. | Hosted rollout and operator verification. |
-| Practitioner completion | Study task and recording sheet are prepared against the frozen rubric. | At least four of five unassisted completions under [#354](https://github.com/lumensparkxy/agentic_test_case_generator/issues/354). |
+| User effort | The paired, mocked Chromium journey still takes seven deliberate actions against eleven, a 36.4% reduction. Both explicit approvals and all four workbench transitions remain. The four fixture hashes match the frozen run. | Practitioner active time and waiting. |
+| Practitioner completion and review effort | The task and recording sheet are prepared against the frozen rubric. | At least four of five unassisted completions under [#354](https://github.com/lumensparkxy/agentic_test_case_generator/issues/354), and the paired correction and active review time measures. |
+| Business coverage and unsupported facts | The offline intake and scorer bind obligation and fact judgments to exact saved and exported cases and retain unknowns. The two-workflow native SDK rehearsal exercised four arms with authored responses. | Independent labels for critical misses, unsupported facts and the paired rates on the generated cohort. |
+| Healthy reliability and defect sensitivity | The W01 authored suite saved and exported eleven exact cases per arm. All ten baseline and eleven candidate cases admitted to healthy Chromium passed. Both arms ran the eight frozen variants and retained the first failed assertion for each selected case. The candidate also verified the previously blocked empty field, and the reject-but-save probe checked the terminal count after reopening. [PR #520](https://github.com/lumensparkxy/agentic_test_case_generator/pull/520) | Generated applicable cases, healthy results and credited intended assertions across the frozen targets. |
+| Evaluator correctness | On identical authored inputs the candidate structural assessor rejected two defective whitespace designs the baseline accepted and kept all five valid controls, including four quoted filenames. Separate authored responses exercised the design and browser-readiness verdicts. [PR #514](https://github.com/lumensparkxy/agentic_test_case_generator/pull/514) | Independent verdicts and paired live assessor outputs. |
+| Exact artifact integrity | The offline delivery replay sealed all 24 repeat-one packets across 12 workflows and kept 48 unrun slots. The refusal replay kept the W05 saved suite as one partial slot. In both W11 arms, thirteen exact cases were exported at each source checkpoint, seven unaffected versions stayed exact, six were replaced, and a fresh stale export returned HTTP 409. [PR #518](https://github.com/lumensparkxy/agentic_test_case_generator/pull/518) | The full live 36-pair artifact cohort. |
+| Durable decisions and recovery | Isolated Firestore verified exact approvals, response loss, cancellation, release and stale fences. Eight forced worker stops exercised lease expiry, known-unstarted replay, interrupted status and exact saved artifact recovery. The rendered W01 dialog restored focus on the saved decision before the delayed acknowledgement arrived. | Hosted worker identity, dispatch timeouts and shared producer admission in an authorized environment. |
+| Runtime cost and latency | The offline ledger exercised bounded mock reservation and settlement. | Paired provider cost and latency, including call and token coverage. |
+| Rollback | The same local project and Chromium session passed through enabled, compatible and restored bundles with all twelve public evidence digests unchanged. The separate server restart preserved exact replay while refusing fresh admission. | Hosted rollout and operator verification. |
+
+The current desktop replay checked the exact default template in the
+scenario approval request, the same two exported cases including literal
+whitespace, and the direct saved-case link. The archived mock initially
+expected the earlier request shape. The replay assertion now includes the
+template field. Source, Context, plan and suite fixtures are unchanged.
 
 The worker recovery replay pinned `bb500a685fcb1be0ae4e47833d1a1238d896e801`
 and used loopback Firestore with a synthetic SDK transport. Fresh workers
@@ -29,7 +37,7 @@ attempts. Each published artifact had one usage event. Each published Test
 Cases suite had one local shadow billing receipt and an exact case readback.
 The phase PR records the reproduction command and evidence hashes.
 
-The rendered rollback at `6ad1efa` used one disposable Firestore project
+The rendered rollback at `6de863c` used one disposable Firestore project
 at revision 16 and one Chromium session at 1440×900. The seed saved a historical
 reasoned-draft JSON report, a successor report with a distinct case version,
 and a healthy and seeded-fault Directory run. Both aliases resolved in all
@@ -44,8 +52,8 @@ documents. Sixty-five matched exactly. Existing entitlement reads refreshed
 only `updated_at` on the owner billing account and user profile. All project
 evidence matched. The harness blocked 36 optional font stylesheet requests
 and all provider traffic. The phase PR records the manifest, input and file
-digests, browser captures, and reproduction command.
-The current client rehearsal is recorded in
+digests, browser captures, and reproduction command. The earlier rehearsal
+at `6ad1efa` is recorded in
 [#510](https://github.com/lumensparkxy/agentic_test_case_generator/pull/510).
 
 In a separate W01 server rehearsal at the same pin, Chromium exported the
@@ -56,7 +64,7 @@ byte-identical JSON. A fresh request against the current revision returned
 HTTP 409 with `design_delivery_disabled`. The exact saved report and
 original case still matched. All 59 Firestore document contents and update
 times were identical across the restart and readback. The worker used
-authored SDK responses in the loopback emulator.
+six authored SDK responses in the loopback emulator.
 
 ## Local rollout and rollback
 
