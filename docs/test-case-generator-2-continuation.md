@@ -612,6 +612,17 @@ preserved the unaffected requirement decisions, and saved the revised
 6-attendee source and Context. Provider attempts were zero. The native
 W01/W05 smoke remains the separate scenario-through-export rehearsal.
 
+P6 structural review under
+[#499](https://github.com/lumensparkxy/agentic_test_case_generator/issues/499)
+requires exact rendered whitespace evidence for structured step-data cases.
+An exact scoped result after input must match a current prior field value.
+The frozen baseline approved two authored defective controls, one without a
+rendered check and one expecting a different literal. The fixed review
+rejected both and kept the valid exact control. Chromium confirmed that
+only the valid control passed healthy and detected the seeded whitespace
+collapse at the intended assertion. The authored comparison sits outside
+the frozen live corpus and keeps independent adjudication open.
+
 The next externally gated actions are an authorized W05/W01 live smoke,
 independent practitioner validation, and verification of a hosted worker
 identity and timeout policy. Live provider pairs require a bounded budget

@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 import sys
 from typing import Any, Dict
@@ -112,7 +113,8 @@ class RequirementAnalysisCoverageMetricTests(unittest.TestCase):
         self.assertEqual(metrics["risk_signals_covered"], 1)
         self.assertEqual(metrics["high_risk_items_without_tests"], [])
 
-    def test_rendered_whitespace_risk_needs_exact_linked_output_evidence(self) -> None:
+    @staticmethod
+    def _rendered_whitespace_fixture():
         requirements = [Requirement(id="JSON-VALID", text="Show the accepted JSON with original spacing.")]
         title = "Whitespace and indentation collapsing in rendered view"
         analysis = [
@@ -130,6 +132,10 @@ class RequirementAnalysisCoverageMetricTests(unittest.TestCase):
                 ],
             }
         ]
+        return requirements, title, analysis
+
+    def test_rendered_whitespace_risk_needs_exact_linked_output_evidence(self) -> None:
+        requirements, title, analysis = self._rendered_whitespace_fixture()
         payload = '{\n  "enabled": false,\n  "label": "  Launch into β  "\n}'
         fill = {"action": 'Enter step data into field "Payload"', "test_data": payload}
         output = {"expected": 'test id "saved-payload" text should equal step data', "test_data": payload}
@@ -147,6 +153,94 @@ class RequirementAnalysisCoverageMetricTests(unittest.TestCase):
                     metrics = _compute_requirement_analysis_metrics(analysis, cases, requirements)
                     self.assertEqual(metrics["risk_signals_covered"], int(covered))
                     self.assertEqual(metrics["high_risk_items_without_tests"], [] if covered else [f"JSON-VALID - {title}"])
+
+    @staticmethod
+    def _fill_literal(field, value):
+        return {"action": f'Enter step data into field "{field}"', "expected": f'field "{field}" value should equal step data', "test_data": value}
+
+    def _assert_whitespace_review(self, steps, *, covered, automation_status=None, claims_coverage=False):
+        requirements, title, analysis = self._rendered_whitespace_fixture()
+        scenario = {
+            "id": "JSON-VALID-SCN-01",
+            "requirement_id": "JSON-VALID",
+            "scenario_type": "Happy Path",
+            "title": "Save the editor payload",
+            "objective": "Observe the value after submitting the form.",
+            "priority": "High",
+            "must_have": True,
+        }
+        case = {
+            "id": "TC-JSON-VALID",
+            "title": title if claims_coverage else scenario["title"],
+            "description": "Check the payload editor.",
+            "preconditions": "The editor and a saved record are available.",
+            "expected_result": "The editor displays the saved payload.",
+            "linked_requirement_ids": ["JSON-VALID"],
+            "scenario_refs": [scenario["id"]],
+            "steps": [{"step": number, **step} for number, step in enumerate(steps, 1)],
+        }
+        if automation_status is not None:
+            case["automation_status"] = automation_status
+        metrics = _compute_requirement_analysis_metrics(analysis, [case], requirements)
+        self.assertEqual(metrics["risk_signals_covered"], int(covered))
+        self.assertEqual(metrics["high_risk_items_without_tests"], [] if covered else [f"JSON-VALID - {title}"])
+
+        review = _heuristic_test_case_review(
+            [case],
+            requirements,
+            90,
+            coverage_plan=[{"requirement_id": "JSON-VALID", "requirement_text": requirements[0].text, "scenarios": [scenario]}],
+            requirement_analysis=analysis,
+        )
+        self.assertEqual(review["approved"], covered, review)
+        self.assertEqual(any("High-risk requirement analysis items" in issue for issue in review["blocking_issues"]), not covered, review)
+
+    def test_structured_rendered_whitespace_requires_matching_current_readback(self) -> None:
+        payload = '{\n  "label": "  Launch into β  "\n}'
+        different_payload = payload.replace("Launch", "Return")
+        fill = self._fill_literal("Payload", payload)
+        submit = {"action": 'Click exact button "Apply payload"', "expected": 'exact text "Valid JSON accepted" is visible'}
+        readback = {"action": "Inspect the saved payload", "expected": 'test id "saved-payload" text should equal step data', "test_data": payload}
+        page_title = {"action": "Inspect the page title", "expected": 'page title should be "Payload editor"'}
+        for label, steps, covered in (
+            ("matching current input", [fill, submit, readback], True),
+            ("page title only", [fill, submit, page_title], False),
+            ("input value only", [fill, submit], False),
+            ("wrong multiline", [fill, submit, {**readback, "test_data": different_payload}], False),
+            ("stale same-field value", [fill, self._fill_literal("Payload", different_payload), submit, readback], False),
+            ("readback before fill", [readback, fill, submit], False),
+        ):
+            for automation_status in (None, "Automated", "To Be Automated"):
+                with self.subTest(label=label, automation_status=automation_status):
+                    self._assert_whitespace_review(steps, covered=covered, automation_status=automation_status, claims_coverage=True)
+
+    def test_structured_rendered_whitespace_keeps_seeded_quoted_and_multifield_readback(self) -> None:
+        literal = '  Keep "β"  '
+        fill = self._fill_literal("Payload", literal)
+        open_record = {"action": 'Open "https://example.test/saved"', "expected": 'exact heading "Saved record" is visible'}
+        readback = {"action": "Inspect the saved payload", "expected": 'css "#saved-payload" text should equal step data', "test_data": literal}
+        quoted = {"action": "Inspect the saved payload", "expected": f'css "#saved-payload" text should equal {json.dumps(literal, ensure_ascii=False)}'}
+        for label, steps in (
+            ("exact seeded output", [open_record, readback]),
+            ("matching quoted output after step-data fill", [fill, quoted]),
+            ("earlier value from a different field remains current", [fill, self._fill_literal("Summary", "  Other β  "), readback]),
+        ):
+            with self.subTest(label=label):
+                self._assert_whitespace_review(steps, covered=True, automation_status="To Be Automated")
+
+        replacement = "  Updated β  "
+        quoted_fill = {"action": f'Enter "{replacement}" into field "Payload"', "expected": f'field "Payload" value should equal "{replacement}"'}
+        self._assert_whitespace_review([fill, quoted_fill, readback], covered=False, automation_status="To Be Automated", claims_coverage=True)
+        self._assert_whitespace_review([fill, quoted_fill, {**readback, "test_data": replacement}], covered=True, automation_status="To Be Automated")
+
+    def test_rendered_whitespace_preserves_legacy_manual_and_unstructured_review(self) -> None:
+        inspect = {"action": "Inspect the stored record.", "expected": "The rendered whitespace and indentation are preserved."}
+        for automation_status, entry in (
+            ("Manual", self._fill_literal("Payload", "  Manual β  ")),
+            ("Automated", {"action": "Enter the prepared payload.", "expected": "The editor shows the input."}),
+        ):
+            with self.subTest(automation_status=automation_status):
+                self._assert_whitespace_review([entry, inspect], covered=True, automation_status=automation_status)
 
     def test_high_risk_gaps_block_review(self) -> None:
         weak_test_cases = [

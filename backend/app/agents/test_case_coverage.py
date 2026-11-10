@@ -6,7 +6,15 @@ from typing import Any, Dict, List, Optional
 
 from .analysis_agent import fallback_requirement_analysis, normalize_requirement_analysis
 from ..models import Requirement
-from ..services.execution_service import _step_data_assertion
+from ..services.execution_service import (
+    QUOTED_FILL_ACTION,
+    SCOPED_TEXT_ASSERTION_PATTERN,
+    STEP_DATA_FILL_ACTION,
+    _assertion_literal,
+    _assertion_statement,
+    _clean_label,
+    _step_data_assertion,
+)
 
 ALLOWED_TEST_CASE_TYPES = {
     "Functional",
@@ -769,23 +777,44 @@ def _analysis_item_is_covered(item_text: str, linked_case_texts: List[str], link
     return False
 
 
-def _checks_exact_rendered_whitespace(test_case: Dict[str, Any]) -> bool:
+def _structured_rendered_whitespace_coverage(test_case: Dict[str, Any]) -> bool | None:
+    """Verify step-data readbacks. None leaves other case formats to the existing review."""
     steps = test_case.get("steps")
     if not isinstance(steps, list):
-        return False
-    for step in steps:
-        if not isinstance(step, dict):
-            continue
+        return None
+    steps = [step for step in steps if isinstance(step, dict)]
+    fills = [STEP_DATA_FILL_ACTION.fullmatch(str(step.get("action") or "").strip()) for step in steps]
+    has_fill = any(fills)
+    uses_step_data = has_fill
+    manual = test_case.get("automation_status") == "Manual"
+    current_values = {}
+    matches_rendered_value = False
+    for step, fill in zip(steps, fills, strict=True):
         value = step.get("test_data")
-        if not isinstance(value, str) or value == " ".join(value.split()):
-            continue
+        value = value if isinstance(value, str) else None
+        if fill:
+            current_values[_assertion_literal(fill["label"])] = value
+        elif quoted_fill := QUOTED_FILL_ACTION.fullmatch(str(step.get("action") or "").strip()):
+            field = _assertion_literal(quoted_fill["exact_label"]) if quoted_fill["exact_label"] else _clean_label(quoted_fill["label"])
+            if field in current_values:
+                current_values[field] = _assertion_literal(quoted_fill["value"])
         for instruction in (step.get("expected"), step.get("action")):
             if not isinstance(instruction, str):
                 continue
-            assertion, _ = _step_data_assertion(instruction, value)
+            assertion, uses_data = _step_data_assertion(instruction, value)
+            uses_step_data |= uses_data
+            rendered = None
             if assertion and assertion.kind == "assert_scoped_text_equals":
+                rendered = value
+            elif literal := SCOPED_TEXT_ASSERTION_PATTERN.fullmatch(_assertion_statement(instruction)):
+                rendered = _assertion_literal(f'"{literal["expected"]}"')
+            if rendered is None or rendered == " ".join(rendered.split()):
+                continue
+            if manual and assertion:
                 return True
-    return False
+            if not has_fill or rendered in current_values.values():
+                matches_rendered_value = True
+    return matches_rendered_value if uses_step_data and not manual else None
 
 
 def _compute_requirement_analysis_metrics(
@@ -921,11 +950,17 @@ def _compute_requirement_analysis_metrics(
             rendered_whitespace_risk = (
                 category == "Data Integrity" and _WHITESPACE_RISK_PATTERN.search(risk_text) and _RENDERED_OUTPUT_RISK_PATTERN.search(risk_text)
             )
-            # Data Variation or Negative alone says nothing about the rendered output.
-            hinted_scenarios = set() if rendered_whitespace_risk else RISK_SCENARIO_HINTS.get(category, {"Happy Path", "Negative"})
-            covered = _analysis_item_is_covered(risk_text, linked_case_texts, linked_scenarios, hinted_scenarios)
-            if not covered and rendered_whitespace_risk:
-                covered = any(_checks_exact_rendered_whitespace(test_case) for test_case in linked_cases)
+            if rendered_whitespace_risk:
+                # Text overlap cannot replace an explicit step-data readback.
+                covered = False
+                for case, text in zip(linked_cases, linked_case_texts, strict=True):
+                    structured = _structured_rendered_whitespace_coverage(case)
+                    if structured or (structured is None and _analysis_item_is_covered(risk_text, [text], set(), set())):
+                        covered = True
+                        break
+            else:
+                hinted_scenarios = RISK_SCENARIO_HINTS.get(category, {"Happy Path", "Negative"})
+                covered = _analysis_item_is_covered(risk_text, linked_case_texts, linked_scenarios, hinted_scenarios)
             if covered:
                 risk_signals_covered += 1
                 risk_hits += 1
