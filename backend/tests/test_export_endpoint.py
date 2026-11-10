@@ -602,6 +602,39 @@ class ExportPublicationTests(unittest.TestCase):
             self.assertEqual(replay.content, draft.content)
             self.assertEqual(self.store, writes)
 
+    def test_exact_stale_projection_blocks_fresh_files_after_explicitly_omitted_context_changes(self):
+        self.seed_reviewed_design(legacy_approved=True)
+        self.assertIs(self.suite.metadata["source_context_omitted"], True)
+        original = self.post(request_id="before-context")
+        self.assertEqual(original.status_code, 200, original.text)
+        report_id = original.headers["X-Export-Report-ID"]
+        saved = self.read_report(report_id).json()
+        self.assertEqual(saved["delivery_kind"], "approved")
+        self.save("context", {"notes": "New observed checkout context."}, operation="context.enrich")
+        stages = self.store[f"qa_projects/{self.project_id}"]["stage_state"]
+        # Reproduce an earlier persisted suite whose stage flags did not follow the Context update.
+        stages["use_cases"]["stale"] = False
+        stages["test_cases"]["stale"] = False
+        project = self.project()
+        self.assertFalse(project.stage_state["test_cases"].stale)
+        self.assertEqual(project.suite_quality.suite_snapshot_id, self.suite.snapshot_id)
+        self.assertEqual(project.suite_quality.source_freshness, "stale")
+        before = deepcopy(self.store)
+        with patch.dict(os.environ, {"TCG_DESIGN_DELIVERY_ENABLED": "true"}):
+            for intent in ({}, {"draft_override_requested": True, "draft_override_reason": "Inspect the saved tests."}, {"delivery_intent": "reviewed_design"}):
+                with self.subTest(intent=intent):
+                    rejected = self.post(request_id="after-context", base_project_revision=project.current_revision, **intent)
+                    self.assertEqual(rejected.status_code, 409, rejected.text)
+                    detail = rejected.json()["detail"]
+                    if intent.get("delivery_intent"):
+                        self.assertEqual(detail["code"], "design_delivery_unavailable")
+                    else:
+                        self.assertIn("older upstream inputs", detail)
+        historical = self.read_report(report_id).json()
+        self.assertEqual(historical["delivery_kind"], "approved")
+        self.assertEqual(historical["evidence"], saved["evidence"])
+        self.assertEqual(self.store, before)
+
     def test_legacy_fingerprints_and_bytes_match_the_pre_upgrade_contract(self):
         with patch.dict(os.environ, {"TCG_DESIGN_DELIVERY_ENABLED": "false"}):
             first = self.post()

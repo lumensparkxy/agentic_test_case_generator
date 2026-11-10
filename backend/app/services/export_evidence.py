@@ -139,7 +139,9 @@ def build_export_evidence(payload: ExportTestCasesInput, project: QaProjectDetai
     saved = snapshot.payload if snapshot else {}
     metadata = snapshot.metadata if snapshot else {}
     quality = project.suite_quality if snapshot else None
-    reassessment_required = quality and quality.suite_snapshot_id == snapshot.snapshot_id and DESIGN_REASSESSMENT_REQUIRED in quality.reason_codes
+    if quality and quality.suite_snapshot_id != snapshot.snapshot_id:
+        quality = None
+    reassessment_required = quality and DESIGN_REASSESSMENT_REQUIRED in quality.reason_codes
     review = None
     # Leave the superseded approval on the saved suite and its historical reports.
     if not reassessment_required and isinstance(saved.get("review"), dict) and isinstance(saved["review"].get("approved"), bool):
@@ -179,6 +181,8 @@ def build_export_evidence(payload: ExportTestCasesInput, project: QaProjectDetai
                     requirements = [Requirement.model_validate(item) for item in current.payload.get("requirements", [])]
                 except ValidationError, TypeError, ValueError:
                     requirements = None
+    if not design_requested and quality and quality.source_freshness == "stale":
+        _conflict("The suite references older upstream inputs. Refresh and review it before exporting.")
     if snapshot:
         source_ids["test_cases"] = snapshot.snapshot_id
     for requirement in requirements or []:

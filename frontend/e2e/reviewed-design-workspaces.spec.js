@@ -28,6 +28,7 @@ async function setup(
 	page,
 	{
 		stale = false,
+		staleBoundSource = false,
 		available = true,
 		oldServer = false,
 		runEvidence,
@@ -107,6 +108,11 @@ async function setup(
 		},
 	};
 	project.stage_state.test_cases = { current_snapshot_id: suiteId, version: 2, stale, approved: legacyApproved, metadata };
+	if (staleBoundSource) {
+		project.current_snapshots.requirements.snapshot_id = "later-requirements";
+		project.stage_state.requirements.current_snapshot_id = "later-requirements";
+		project.stage_state.use_cases.stale = true;
+	}
 	const humanChangesRequested = suiteHumanReview === "current" || suiteHumanReview === "legacy";
 	if (suiteHumanReview) {
 		project.stage_state.test_cases.metadata = {
@@ -198,12 +204,13 @@ async function setup(
 		project.execution_runs.unshift(indexedRun);
 	}
 	if (!oldServer) {
-		const complete = available && !stale && !reassessment;
+		const sourcesStale = stale || staleBoundSource;
+		const complete = available && !sourcesStale && !reassessment;
 		project.design_delivery_enabled = true;
 		project.reviewed_design_available = complete && !humanChangesRequested;
 		project.suite_quality = {
 			suite_snapshot_id: suiteId,
-			source_freshness: stale ? "stale" : available || reassessment ? "current" : "unknown",
+			source_freshness: sourcesStale ? "stale" : available || reassessment ? "current" : "unknown",
 			design_status: complete ? "complete" : "unknown",
 			scenario_decision: "approved",
 			scenario_snapshot_id: plan.snapshot_id,
@@ -216,7 +223,13 @@ async function setup(
 			active_case_count: project.current_snapshots.test_cases.payload.test_cases.length,
 			deprecated_case_count: 0,
 			reason_codes: [
-				stale ? "sources_stale" : reassessment ? "design_reassessment_required" : complete ? "design_verified" : "design_proof_missing",
+				sourcesStale
+					? "sources_stale"
+					: reassessment
+						? "design_reassessment_required"
+						: complete
+							? "design_verified"
+							: "design_proof_missing",
 			],
 		};
 	}
@@ -387,6 +400,54 @@ const exportDesign = (page) => page.getByRole("button", { name: "Export reviewed
 
 test.describe("Exact suite evidence across Review and Deliver", () => {
 	test.skip(!v2, "Requires the opt-in project workspaces");
+
+	for (const [label, options, reviewSection] of [
+		["a stale suite", { stale: true }, "/review/tests"],
+		["older bound sources", { staleBoundSource: true }, "/review"],
+	]) {
+		test(`blocks fresh exports for ${label} and opens the current review`, async ({ page }, testInfo) => {
+			const { errors, writes } = await setup(page, { ...options, suiteHumanReview: "earlier" });
+			await page.setViewportSize({ width: 1440, height: 900 });
+			await Promise.all([
+				page.waitForResponse((response) => new URL(response.url()).pathname === `${root}/orchestrator/status` && response.ok()),
+				page.goto(`${root}/deliver`),
+			]);
+			await expect(quality(page)).toContainText(/Source freshness\s*Stale/);
+			await expect(page.getByText("Export unavailable for stale sources", { exact: true })).toBeVisible();
+			await expect(page.getByText("Approved for export", { exact: true })).toHaveCount(0);
+			await expect(page.getByRole("checkbox", { name: "Export draft anyway", exact: true })).toHaveCount(0);
+			const formats = page.locator(".export-buttons").getByRole("button");
+			await expect(formats).toHaveCount(3);
+			for (const format of await formats.all()) await expect(format).toBeDisabled();
+			await expect(page.getByText("Loading project recommendations...", { exact: true })).toHaveCount(0);
+			await page.screenshot({ path: testInfo.outputPath("stale-files-blocked.png") });
+
+			await page.getByRole("link", { name: "Open current review", exact: true }).press("Enter");
+			await expect(page).toHaveURL(`${root}${reviewSection}`);
+			expect(writes).toEqual([]);
+			expect(errors).toEqual([]);
+		});
+	}
+
+	test("reads an earlier saved report while fresh file actions are stale", async ({ page }) => {
+		const { errors, project, writes, reportReads } = await setup(page);
+		await page.goto(`${root}/deliver`);
+		const download = page.waitForEvent("download");
+		await exportDesign(page).press("Enter");
+		await download;
+		await expect(page.getByText("Reviewed design exported as JSON", { exact: true })).toBeVisible();
+		project.stage_state.test_cases.stale = true;
+		project.reviewed_design_available = false;
+		Object.assign(project.suite_quality, { source_freshness: "stale", design_status: "unknown", reason_codes: ["sources_stale"] });
+		await page.reload();
+		await expect(page.getByText("Export unavailable for stale sources", { exact: true })).toBeVisible();
+		await page.getByRole("link", { name: "Open latest saved file report", exact: true }).press("Enter");
+		await expect(page.getByRole("heading", { name: "Saved file report", exact: true })).toBeVisible();
+		await expect(page.getByText("Reviewed design", { exact: true })).toBeVisible();
+		expect(reportReads).toContain(reportId);
+		expect(writes).toEqual(["POST /export/json"]);
+		expect(errors).toEqual([]);
+	});
 
 	test("requires a reasoned draft after human changes to the exact saved suite", async ({ page }, testInfo) => {
 		const { errors, exportRequests, writes, testCase, reportReads } = await setup(page, { suiteHumanReview: "current" });
@@ -975,6 +1036,16 @@ test("respects an older exact requested-changes record without a quality project
 	await expect(page.getByText("Human review requested changes to this saved suite.", { exact: false })).toBeVisible();
 	await expect(page.getByRole("button", { name: "JSON API/Import ready", exact: true })).toBeDisabled();
 	await expect(page.getByRole("checkbox", { name: "Export draft anyway", exact: true })).toBeVisible();
+	expect(writes).toEqual([]);
+	expect(errors).toEqual([]);
+});
+
+test("blocks a stale suite without a quality projection", { tag: "@p1" }, async ({ page }) => {
+	const { errors, writes } = await setup(page, { stale: true, oldServer: true, suiteHumanReview: "earlier" });
+	await page.goto(v2 ? `${root}/deliver` : `${root}/reports`);
+	await expect(page.getByText("Export unavailable for stale sources", { exact: true })).toBeVisible();
+	await expect(page.getByRole("button", { name: "JSON API/Import ready", exact: true })).toBeDisabled();
+	await expect(page.getByRole("checkbox", { name: "Export draft anyway", exact: true })).toHaveCount(0);
 	expect(writes).toEqual([]);
 	expect(errors).toEqual([]);
 });

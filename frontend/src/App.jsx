@@ -4544,6 +4544,7 @@ export default function App() {
 		apply_update: testCaseActionDisabled,
 	};
 	const exportEvidenceKey = `${currentProjectId}:${projectSnapshots.test_cases?.snapshot_id}:${currentProjectRevision}`;
+	const savedSuiteSourcesStale = Boolean(testCaseStageState.stale || exactSuiteQuality?.source_freshness === "stale");
 	const latestSuiteHumanReview = testCaseStageState.metadata?.latest_human_review;
 	const humanSuiteChangesRequested =
 		exactSuiteQuality?.human_acceptance === "changes_requested" ||
@@ -4564,7 +4565,7 @@ export default function App() {
 		!savedSuiteExportBlocker &&
 		currentProject?.design_delivery_enabled === true &&
 		currentProject.reviewed_design_available === true &&
-		!testCaseStageState.stale &&
+		!savedSuiteSourcesStale &&
 		persistedTestCaseCount
 	);
 	const exactSuiteRun = findExactSuiteRun(currentProject, currentSuiteSnapshotId, executionRunResult);
@@ -4608,18 +4609,25 @@ export default function App() {
 		!savedSuiteExportBlocker &&
 		testCaseReview?.approved &&
 		projectStageState.test_cases?.approved &&
-		!projectStageState.test_cases?.stale &&
+		!savedSuiteSourcesStale &&
 		projectSnapshots.test_cases?.snapshot_id &&
 		Array.isArray(projectSnapshots.test_cases?.payload?.generation_tasks) &&
 		generationTasks.length === 0
 	);
-	const exportRequiresOverride = Boolean(testCases.length > 0 && !exportReviewApproved && !reviewedDesignAvailable);
+	const exportRequiresOverride = Boolean(
+		!savedSuiteSourcesStale && testCases.length > 0 && !exportReviewApproved && !reviewedDesignAvailable
+	);
 	const draftExportOverrideReasonProvided = draftExportOverrideReason.trim().length > 0;
-	const exportGateLocked = Boolean(exportRequiresOverride && (!draftExportOverrideRequested || !draftExportOverrideReasonProvided));
+	const exportGateLocked =
+		savedSuiteSourcesStale || (exportRequiresOverride && (!draftExportOverrideRequested || !draftExportOverrideReasonProvided));
 
 	const exportToFormat = async (format) => {
 		if (exportGateLocked) {
-			setStatus("Export locked by review gate. Add an override reason to export draft test cases.");
+			setStatus(
+				savedSuiteSourcesStale
+					? "Refresh and review the saved suite against the current sources before exporting."
+					: "Export locked by review gate. Add an override reason to export draft test cases."
+			);
 			return;
 		}
 		const operationScope = captureProjectOperationScope();
@@ -5173,6 +5181,12 @@ export default function App() {
 	const openScope = () => navigate(buildProjectWorkspacePath(navigationProjectId, "review"));
 	const scenariosPath = navigationProjectId ? buildProjectWorkspacePath(navigationProjectId, "review", "scenarios") : "";
 	const testsPath = navigationProjectId ? buildProjectWorkspacePath(navigationProjectId, "review", "tests") : "";
+	const staleExportReviewPath =
+		savedSuiteSourcesStale && navigationProjectId
+			? PROJECT_WORKSPACES_V2
+				? buildProjectWorkspacePath(navigationProjectId, "review", reviewEntrySection)
+				: buildProjectPath(navigationProjectId, PROJECT_DESTINATIONS.TEST_CASES)
+			: "";
 	const savedReviewAssessment = reviewFindingsSuite?.payload?.substantive_assessment;
 	const hasSavedDesignFindings =
 		(savedReviewAssessment?.design_status ?? savedReviewAssessment?.status) === "incomplete" ||
@@ -7285,6 +7299,8 @@ export default function App() {
 											request={apiRequest}
 											exportReviewApproved={exportReviewApproved}
 											savedSuiteExportBlocker={savedSuiteExportBlocker}
+											savedSuiteSourcesStale={savedSuiteSourcesStale}
+											staleExportReviewPath={staleExportReviewPath}
 											exportRequiresOverride={exportRequiresOverride}
 											exportGateLocked={exportGateLocked}
 											draftExportOverrideRequested={draftExportOverrideRequested}

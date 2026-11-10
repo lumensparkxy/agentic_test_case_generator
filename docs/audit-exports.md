@@ -88,3 +88,8 @@ to satisfy current file admission.
 A request for changes to the exact current suite also requires a reasoned
 draft. Review and Deliver keep independent design status visible alongside
 the human decision. A decision on an earlier suite stays with that suite.
+
+Fresh exports require current sources. When a suite or its bound inputs
+are stale, refresh and review the current suite before exporting. Draft
+reasons apply to review gates on a current suite. Earlier saved reports
+remain available through their exact report links.

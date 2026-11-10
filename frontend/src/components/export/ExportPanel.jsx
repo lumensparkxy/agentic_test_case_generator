@@ -27,6 +27,8 @@ export default function ExportPanel({
 	request,
 	exportReviewApproved,
 	savedSuiteExportBlocker,
+	savedSuiteSourcesStale,
+	staleExportReviewPath,
 	exportRequiresOverride,
 	exportGateLocked,
 	draftExportOverrideRequested,
@@ -58,6 +60,7 @@ export default function ExportPanel({
 	const runIds = new URLSearchParams(location.search).getAll("run");
 	const runRecordId = runIds.length === 1 ? runIds[0] : "";
 	const exportDisabled = testCases.length === 0 || isExporting || authActionDisabled || exportGateLocked;
+	const reviewPath = savedSuiteSourcesStale ? staleExportReviewPath : savedSuiteExportBlocker ? backToTestsPath : "";
 	const executionReport = (
 		<ExecutionReport
 			currentProject={currentProject}
@@ -105,31 +108,41 @@ export default function ExportPanel({
 			)}
 			{suiteQualitySummary}
 			{testCases.length > 0 && (
-				<div className={`export-readiness-card ${exportRequiresOverride ? "locked" : exportReviewApproved ? "approved" : ""}`}>
+				<div
+					className={`export-readiness-card ${savedSuiteSourcesStale || exportRequiresOverride ? "locked" : exportReviewApproved ? "approved" : ""}`}
+				>
 					<div>
 						{reviewedDesignAvailable ? (
 							<h3 className="section-subtitle">Reviewed design ready to export</h3>
 						) : (
 							<strong>
-								{exportRequiresOverride ? "Export locked by review gate" : exportReviewApproved ? "Approved for export" : "Ready to export"}
+								{savedSuiteSourcesStale
+									? "Export unavailable for stale sources"
+									: exportRequiresOverride
+										? "Export locked by review gate"
+										: exportReviewApproved
+											? "Approved for export"
+											: "Ready to export"}
 							</strong>
 						)}
 						<p>
 							{reviewedDesignAvailable
 								? "Download the saved suite with its design assessment, source evidence, and separate browser setup status."
-								: savedSuiteExportBlocker
-									? `${savedSuiteExportBlocker} Provide a reason to export the current cases as a draft.`
-									: exportRequiresOverride
-										? testCaseReview?.approved
-											? "The suite is incomplete or its saved approval is unavailable. Provide a reason to export this draft."
-											: testCaseReview?.summary || "No review decision is available. Provide a reason to export this draft."
-										: exportReviewApproved
-											? testCaseReview?.summary || "The latest generated test cases passed the review gate."
-											: "No review decision is available for this export."}
+								: savedSuiteSourcesStale
+									? "Refresh and review the saved suite against the current sources before exporting."
+									: savedSuiteExportBlocker
+										? `${savedSuiteExportBlocker} Provide a reason to export the current cases as a draft.`
+										: exportRequiresOverride
+											? testCaseReview?.approved
+												? "The suite is incomplete or its saved approval is unavailable. Provide a reason to export this draft."
+												: testCaseReview?.summary || "No review decision is available. Provide a reason to export this draft."
+											: exportReviewApproved
+												? testCaseReview?.summary || "The latest generated test cases passed the review gate."
+												: "No review decision is available for this export."}
 						</p>
-						{savedSuiteExportBlocker && backToTestsPath && (
-							<RouteLink to={backToTestsPath} navigate={navigate}>
-								Open test review
+						{reviewPath && (
+							<RouteLink to={reviewPath} navigate={navigate}>
+								{savedSuiteSourcesStale ? "Open current review" : "Open test review"}
 							</RouteLink>
 						)}
 					</div>
