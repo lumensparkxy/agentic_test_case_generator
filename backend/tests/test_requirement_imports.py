@@ -1008,6 +1008,178 @@ class ImportPersistenceTests(unittest.TestCase):
         self.assertEqual(self.store[budget_path]["requests_reserved"], 23)
         self.assertFalse(any(key.startswith(f"{OUTBOX_COLLECTION}/") for key in self.store))
 
+    def test_enrolled_compare_replays_one_successor_and_preserves_the_intake_budget(self):
+        self.enable_extraction_admission()
+        self.enterContext(patch.object(continuation_service, "transactional", side_effect=_run_transaction))
+        self.repo.cancel(PID, self.p.import_id, ACTOR)
+        client, _, workflow = self.extraction_client()
+        project = f"qa_projects/{PID}"
+
+        def extract(*_args, **_kwargs):
+            _model_reservation.get()()
+            return workflow
+
+        with patch.object(requirement_routes, "extract_requirements", side_effect=extract) as extractor:
+            initial = self._extract(client, "stale-journey-file")
+        extractor.assert_called_once()
+        self.assertEqual(initial.status_code, 200, initial.text)
+        old = RequirementImportPreview.model_validate(initial.json())
+        old_path = f"{project}/requirement_imports/{old.import_id}"
+        intake = deepcopy(self.store[old_path]["extraction"])
+        budget_path = f"{project}/provider_journeys/{intake[journeys.BUDGET_FIELD]}"
+        original_slot = deepcopy(self.store[budget_path]["slots"][journeys.INTAKE_STAGE])
+        compare = f"/projects/{PID}/requirement-imports/{old.import_id}/compare"
+        root = f"/projects/{PID}/requirement-imports"
+
+        def lose_commit_reply(callback):
+            def run(transaction):
+                _run_transaction(callback)(transaction)
+                raise RuntimeError("Lost comparison reply")
+
+            return run
+
+        with (
+            patch.dict(os.environ, {"TCG_APPROVAL_SCENARIOS_ENABLED": "false"}),
+            patch.object(service, "suggest_matches", side_effect=AssertionError("Compare must not spend model requests")) as matcher,
+        ):
+            self.assertEqual(client.post(compare).content, initial.content)
+            self.store[old_path]["extraction"].pop(journeys.BUDGET_FIELD)
+            missing = client.post(compare)
+            self.assertEqual((missing.status_code, missing.json()["detail"]["code"]), (409, journeys.UNAVAILABLE))
+            missing = client.post(f"{root}/{old.import_id}/apply", json=choices(old).model_dump(mode="json"))
+            self.assertEqual((missing.status_code, missing.json()["detail"]["code"]), (409, journeys.UNAVAILABLE))
+            self.store[old_path]["extraction"] = deepcopy(intake)
+            self.store[project]["current_revision"] = 8
+            self.assertEqual(client.post(f"{root}/{old.import_id}/apply", json=choices(old).model_dump(mode="json")).status_code, 409)
+            before = deepcopy(self.store)
+            with patch.object(journeys, "advance_comparison", side_effect=RuntimeError("Failure after staging both preview writes")):
+                with self.assertRaisesRegex(RuntimeError, "Failure after staging"):
+                    client.post(compare)
+            self.assertEqual(self.store, before)
+            with patch.object(service, "transactional", side_effect=lose_commit_reply):
+                with self.assertRaisesRegex(RuntimeError, "Lost comparison reply"):
+                    client.post(compare)
+            recovered = client.post(compare)
+            self.assertEqual(recovered.status_code, 200, recovered.text)
+            first = RequirementImportPreview.model_validate(recovered.json())
+            self.assertEqual(client.post(compare).content, recovered.content)
+            self.assertEqual([row["import_id"] for row in client.get(root).json()], [first.import_id])
+            self.assertEqual(client.delete(f"{root}/{old.import_id}").status_code, 409)
+            self.assertEqual(self.store[old_path]["extraction"], intake)
+            self.assertEqual((first.base_project_revision, first.candidates, first.warnings), (8, old.candidates, old.warnings))
+
+            self.store[project]["current_revision"] = 9
+            self.assertEqual(client.post(compare).content, recovered.content)
+            repeated = client.post(f"{root}/{first.import_id}/compare")
+            self.assertEqual(repeated.status_code, 200, repeated.text)
+            latest = RequirementImportPreview.model_validate(repeated.json())
+            self.assertEqual([row["import_id"] for row in client.get(root).json()], [latest.import_id])
+            self.assertEqual(client.post(compare).status_code, 409)
+            self.assertEqual(client.post(f"{root}/{first.import_id}/compare").content, repeated.content)
+        matcher.assert_not_called()
+
+        other = AuthUser(sub="other", name="Other")
+        with self.assertRaises(HTTPException) as denied:
+            service.recompare_import(PID, latest.import_id, other)
+        self.assertEqual(denied.exception.status_code, 404)
+        self.assertEqual(self.store[budget_path]["slots"], {journeys.INTAKE_STAGE: original_slot})
+        self.assertEqual(self.store[budget_path]["requests_reserved"], 16)
+        self.assertEqual(len(self._rows("billing_consumption")), 1)
+        self.assertEqual(len(self._rows("usage_events")), 1)
+        self.assertNotIn(journeys.COMPARISON_FIELD, latest.model_dump(mode="json"))
+
+        applied = self.repo.apply(PID, latest.import_id, ACTOR, choices(latest), "recovered-apply")
+        applied_id = applied.stage_state["requirements"].current_snapshot_id
+        self.assertEqual(self.store[f"{project}/snapshots/{applied_id}"][journeys.BUDGET_FIELD], intake[journeys.BUDGET_FIELD])
+        scope = RequirementReviewsInput(
+            base_project_revision=applied.current_revision,
+            idempotency_key="recovered-scope",
+            reviews=[
+                {"requirement_uid": row["requirement_uid"], "review_status": "Approved"}
+                for row in applied.current_snapshots["requirements"].payload["requirements"]
+            ],
+        )
+        options = ContinuationOptions(settings_fingerprint="a" * 64, max_provider_requests=7, deadline_seconds=240)
+        self.repo.review(PID, ACTOR, scope, "recovered-scope", continuation=options)
+        run_id = self.review_receipt(scope)["continuation_run_id"]
+        claim = continuation_service.claim_stage(self.client, project_id=PID, run_id=run_id)
+        self.assertIsNotNone(claim)
+        continuation_service.mark_dispatched(self.client, claim, provider_requests=7)
+        self.assertEqual(self.store[budget_path]["requests_reserved"], 23)
+        self.assertEqual(self.store[budget_path]["slots"][journeys.INTAKE_STAGE], original_slot)
+        self.assertEqual(client.post(f"{root}/{first.import_id}/compare").status_code, 409)
+
+    def test_enrolled_connector_compare_checks_changed_baseline_and_exact_lineage(self):
+        self.enable_extraction_admission()
+        client, billing, workflow = self.extraction_client()
+        project = f"qa_projects/{PID}"
+
+        def extract(**_kwargs):
+            _model_reservation.get()()
+            return workflow
+
+        with (
+            patch.object(integrations_jira, "enforce_billing_access", billing),
+            patch.object(integrations_jira, "import_requirements_from_jira", side_effect=extract),
+        ):
+            initial = client.post(
+                "/integrations/jira/import",
+                headers={"X-Request-ID": "stale-journey-jira"},
+                json={"project_id": PID, "base_project_revision": 7, "import_mode": "review", "epic_key": "QA-13"},
+            )
+        self.assertEqual(initial.status_code, 200, initial.text)
+        old = RequirementImportPreview.model_validate(initial.json())
+        root = f"/projects/{PID}/requirement-imports"
+        text = "ZIP checksum 1734."
+        self.store[f"{project}/snapshots/new-baseline"] = snapshot([requirement(9, text)], "new-baseline", 8)
+        self.store[project]["stage_state"]["requirements"]["current_snapshot_id"] = "new-baseline"
+        self.store[project]["current_revision"] = 8
+        build_comparison = service._compare_saved
+
+        def save_while_comparing(*args, **kwargs):
+            result = build_comparison(*args, **kwargs)
+            self.store[project]["current_revision"] = 9
+            return result
+
+        with patch.object(service, "suggest_matches", side_effect=AssertionError("Compare must not run semantic matching")) as matcher:
+            with patch.object(service, "_compare_saved", side_effect=save_while_comparing):
+                stale = client.post(f"{root}/{old.import_id}/compare")
+                self.assertEqual((stale.status_code, stale.json()["detail"]["code"]), (409, "stale_import"))
+            self.assertEqual(self.repo.read(PID, old.import_id, ACTOR)["status"], "pending")
+            self.assertFalse(any(row.import_id.startswith("compare_") for row in self.repo.list_pending(PID, ACTOR)))
+            compared = client.post(f"{root}/{old.import_id}/compare")
+        matcher.assert_not_called()
+        self.assertEqual(compared.status_code, 200, compared.text)
+        current = RequirementImportPreview.model_validate(compared.json())
+        self.assertEqual([row.text for row in current.current_requirements], [text])
+        self.assertEqual([row.requirement for row in current.candidates], [row.requirement for row in old.candidates])
+        self.assertTrue(all(row.classification == "needs_decision" for row in current.candidates))
+        self.assertIn("Compared saved evidence without another model request. Review unmatched requirements manually.", current.warnings)
+        path = f"{project}/requirement_imports/{current.import_id}"
+        binding = self.store[path].pop(journeys.COMPARISON_FIELD)
+        before = deepcopy(self.store)
+        self.assertEqual(
+            client.post(f"{root}/{current.import_id}/apply", json=choices(current).model_dump(mode="json")).json()["detail"]["code"], journeys.UNAVAILABLE
+        )
+        self.assertEqual(client.post(f"{root}/{old.import_id}/compare").json()["detail"]["code"], journeys.UNAVAILABLE)
+        self.assertEqual(self.store, before)
+
+        self.store[path][journeys.COMPARISON_FIELD] = {**binding, "intake_import_id": "different-intake"}
+        self.assertEqual(
+            client.post(f"{root}/{current.import_id}/apply", json=choices(current).model_dump(mode="json")).json()["detail"]["code"], journeys.UNAVAILABLE
+        )
+        self.store[path][journeys.COMPARISON_FIELD] = binding
+        for row in (self.store[path]["candidates"][0]["requirement"], self.store[path]["current_requirements"][0]):
+            original = row["text"]
+            row["text"] = "Fabricated source text"
+            refused = client.post(f"{root}/{current.import_id}/apply", json=choices(current).model_dump(mode="json"))
+            self.assertEqual((refused.status_code, refused.json()["detail"]["code"]), (409, journeys.UNAVAILABLE))
+            row["text"] = original
+        self.assertEqual(client.delete(f"{root}/{current.import_id}").status_code, 204)
+        self.assertEqual(client.post(f"{root}/{current.import_id}/compare").status_code, 409)
+        self.assertEqual(client.post(f"{root}/{old.import_id}/compare").status_code, 409)
+        self.assertEqual(len(self._rows("billing_consumption")), 1)
+
     def test_demo_refinement_blocks_stale_publication_and_requires_exact_interruption_release(self):
         self.enable_extraction_admission()
         client, _, workflow = self.extraction_client()

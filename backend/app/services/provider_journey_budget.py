@@ -15,6 +15,8 @@ REPAIR_STAGE = "testcases.repair"
 EXHAUSTED = "journey_run_budget_exhausted"
 UNAVAILABLE = "journey_run_budget_unavailable"
 BUDGET_FIELD = "provider_journey_id"
+COMPARISON_FIELD = "journey_comparison"
+_COMPARISON_PREFIX = "compare_"
 
 _STAGE_LIMITS = {
     INTAKE_STAGE: 16,
@@ -195,18 +197,90 @@ def finish_preview(transaction, budget, attempt_id, preview):
     transaction.update(budget.ref, {"preview_saved": True, **_result_fields(budget, operation, attempt_id, preview["import_id"])})
 
 
+def comparison_import_id(project_id, predecessor_id, revision):
+    return f"{_COMPARISON_PREFIX}{sha256(f'{project_id}:{predecessor_id}:{revision}'.encode()).hexdigest()}"
+
+
+def enrolled_preview(preview):
+    return str(preview.get("import_id", "")).startswith(_COMPARISON_PREFIX) or COMPARISON_FIELD in preview or BUDGET_FIELD in (preview.get("extraction") or {})
+
+
+def _comparison_binding(preview, predecessor_id):
+    return {
+        "import_id": preview.get("import_id"),
+        "base_project_revision": preview.get("base_project_revision"),
+        "predecessor_import_id": predecessor_id,
+    }
+
+
+def advance_comparison(transaction, budget, preview, predecessor_id):
+    transaction.update(budget.ref, {"active_comparison": _comparison_binding(preview, predecessor_id)})
+
+
+def _incoming_evidence(preview):
+    candidates = preview.get("candidates")
+    if not isinstance(candidates, list) or not candidates or not all(isinstance(row, dict) and isinstance(row.get("requirement"), dict) for row in candidates):
+        raise unavailable()
+    return [(row.get("candidate_id"), row["requirement"]) for row in candidates]
+
+
 def budget_for_preview(transaction, project_doc, actor_id, preview):
-    extraction = preview.get("extraction") or {}
-    if BUDGET_FIELD not in extraction:
+    if not enrolled_preview(preview):
         return None
-    budget = read_budget(transaction, project_doc, actor_id, extraction[BUDGET_FIELD])
+    comparison = preview.get(COMPARISON_FIELD)
+    if str(preview.get("import_id", "")).startswith(_COMPARISON_PREFIX):
+        if not isinstance(comparison, dict):
+            raise unavailable()
+        budget = read_budget(transaction, project_doc, actor_id, comparison.get(BUDGET_FIELD))
+        predecessor_id = comparison.get("predecessor_import_id")
+        revision = preview.get("base_project_revision")
+        if (
+            not isinstance(predecessor_id, str)
+            or not predecessor_id
+            or "/" in predecessor_id
+            or type(revision) is not int
+            or revision <= budget.data["intake_revision"]
+            or comparison.get("intake_import_id") != budget.data["import_id"]
+            or preview.get("import_id") != comparison_import_id(project_doc.id, predecessor_id, revision)
+            or budget.data.get("active_comparison") != _comparison_binding(preview, predecessor_id)
+        ):
+            raise unavailable()
+        imports = project_doc.collection("requirement_imports")
+        original = _read(transaction, imports.document(budget.data["import_id"])) or {}
+        if original.get("status") != "cancelled":
+            raise unavailable()
+        previous = original if predecessor_id == budget.data["import_id"] else _read(transaction, imports.document(predecessor_id)) or {}
+        if (
+            previous.get("import_id") != predecessor_id
+            or previous.get("status") != "cancelled"
+            or previous.get("superseded_by_import_id") != preview["import_id"]
+            or original.get("source_name") != preview.get("source_name")
+            or original.get("source_evidence_findings") != preview.get("source_evidence_findings")
+            or original.get("guidance") != preview.get("guidance")
+            or original.get("workflow_payload") != preview.get("workflow_payload")
+            or _incoming_evidence(original) != _incoming_evidence(preview)
+        ):
+            raise unavailable()
+    else:
+        if COMPARISON_FIELD in preview:
+            raise unavailable()
+        budget = read_budget(transaction, project_doc, actor_id, (preview.get("extraction") or {}).get(BUDGET_FIELD))
+        if budget.data.get("active_comparison") is not None:
+            raise unavailable()
+        original = preview
+
     data = budget.data
     operation = _intake_operation(data)
+    extraction = original.get("extraction") or {}
     if (
         not data.get("preview_saved")
-        or data.get("import_id") != preview.get("import_id")
+        or data.get("import_id") != original.get("import_id")
+        or original.get("project_id") != project_doc.id
+        or preview.get("project_id") != project_doc.id
+        or original.get("operation") != operation
         or preview.get("operation") != operation
-        or data.get("intake_revision") != preview.get("base_project_revision")
+        or data.get("intake_revision") != original.get("base_project_revision")
+        or extraction.get(BUDGET_FIELD) != budget.id
         or data.get("requirements_snapshot_id") is not None
     ):
         raise unavailable()
@@ -220,6 +294,8 @@ def budget_for_preview(transaction, project_doc, actor_id, preview):
         or attempt.get("state") != "completed"
         or attempt.get(BUDGET_FIELD) != budget.id
         or attempt.get("result_import_id") != data["import_id"]
+        or binding.get("import_id") != data["import_id"]
+        or not extraction.get("fingerprint")
         or binding.get("request_fingerprint") != extraction.get("fingerprint")
     ):
         raise unavailable()

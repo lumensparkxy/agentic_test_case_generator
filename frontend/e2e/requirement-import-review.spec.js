@@ -41,10 +41,12 @@ async function setup(
 	{
 		candidates = incoming,
 		revision = 7,
+		currentRequirements,
 		failedApply = false,
 		extractionInterruption,
 		connector,
 		pendingOnLoad = false,
+		inputsWorkspace = false,
 		emptyBaseline = false,
 		sourceName = "TX-6",
 		sourceEvidenceFindings = [],
@@ -52,15 +54,16 @@ async function setup(
 ) {
 	await seedAuthenticatedSession(page);
 	const baseline = emptyBaseline ? [] : originals;
+	const requirementsSnapshotId = currentRequirements ? "revised" : "original";
 	const summary = workspaceProjectFixture({ project_id: ID, name: "Audit project", project_revision: revision });
 	let project = projectDetailFixture(summary, {
 		current_revision: revision,
 		stage_state: {
-			requirements: { version: 1, approved: true, current_snapshot_id: "original" },
+			requirements: { version: currentRequirements ? 2 : 1, approved: true, current_snapshot_id: requirementsSnapshotId },
 			test_cases: { version: 1, approved: true, current_snapshot_id: "tests", stale: false },
 		},
 		current_snapshots: {
-			requirements: { snapshot_id: "original", payload: { requirements: structuredClone(baseline) } },
+			requirements: { snapshot_id: requirementsSnapshotId, payload: { requirements: structuredClone(currentRequirements || baseline) } },
 			test_cases: {
 				snapshot_id: "tests",
 				payload: { test_cases: [{ id: "TC-001", title: "Existing task test", linked_requirement_ids: ["REQ-001"], steps: [] }] },
@@ -118,6 +121,11 @@ async function setup(
 
 	await page.route(`**/projects/${ID}`, (route) => route.fulfill({ json: project }));
 	await page.route(`**/projects/${ID}/requirement-imports`, (route) => route.fulfill({ json: pending }));
+	if (inputsWorkspace) {
+		await page.route(`**/projects/${ID}/requirement-imports/extraction-status`, (route) =>
+			route.fulfill({ json: { enabled: true, blocked: false, attempt: null } })
+		);
+	}
 	const extractions = [];
 	const finishExtraction = (route, input) => {
 		const request = route.request();
@@ -228,8 +236,8 @@ async function setup(
 		pending = [];
 		return route.fulfill({ json: project });
 	});
-	await page.goto(`/projects/${ID}/requirements`);
-	await expect(page.getByRole("heading", { name: "Requirement Review Workbench" })).toBeVisible();
+	await page.goto(`/projects/${ID}/${inputsWorkspace ? "inputs" : "requirements"}`);
+	await expect(page.getByRole("heading", { name: inputsWorkspace ? "Inputs" : "Requirement Review Workbench", exact: true })).toBeVisible();
 	return { applies, extractions, preview, guidanceReads, summaryReads, getProject: () => project };
 }
 
@@ -532,6 +540,98 @@ test("renewed comparison refreshes the baseline revision after a conflict", asyn
 	await expect(page.getByRole("button", { name: "Apply reviewed changes" })).toBeEnabled();
 	await expect(page.getByText("Project changed after this comparison. Compare again before applying.", { exact: true })).toHaveCount(0);
 });
+
+test(
+	"a dropped Compare again response replays the sole pending successor without changing approved scope",
+	{ tag: "@p1" },
+	async ({ page }, testInfo) => {
+		const revisedText = "The system shall preserve the approved revised task behavior.";
+		const revisedSource = {
+			...originals[0].sources[0],
+			source_version: "v2",
+			excerpt: revisedText,
+			excerpt_verified: true,
+			original_requirement_ids: ["TASK-01"],
+		};
+		const currentRequirements = [
+			{ ...originals[0], text: revisedText, content_version: 2, sources: [revisedSource] },
+			...originals.slice(1),
+		];
+		const inputsWorkspace = process.env.E2E_PROJECT_WORKSPACES_V2 === "true";
+		const state = await setup(page, { revision: 8, currentRequirements, pendingOnLoad: true, inputsWorkspace });
+		const baseline = structuredClone(state.getProject());
+		const root = `/projects/${ID}/requirement-imports`;
+		const comparePath = `${root}/import-1/compare`;
+		const warning = "Compared saved evidence without another model request. Review unmatched requirements manually.";
+		const successor = {
+			...state.preview,
+			import_id: "import-2",
+			base_project_revision: 8,
+			current_requirements: currentRequirements,
+			warnings: [warning],
+		};
+		let pending = state.preview;
+		const writes = [];
+		page.on("request", (request) => {
+			if (["fetch", "xhr"].includes(request.resourceType()) && !["GET", "HEAD", "OPTIONS"].includes(request.method())) {
+				writes.push(`${request.method()} ${new URL(request.url()).pathname}`);
+			}
+		});
+		await page.route(`**${root}`, (route) => route.fulfill({ json: [pending] }));
+		await page.route(`**${comparePath}`, (route) => {
+			expect(route.request().method()).toBe("POST");
+			expect(route.request().postData()).toBeNull();
+			if (pending === state.preview) {
+				pending = successor;
+				return route.abort("failed");
+			}
+			return route.fulfill({ json: successor });
+		});
+		const review = page.getByRole("button", { name: "Review import: TX-6", exact: true });
+		const comparison = page.getByRole("region", { name: "Compare incoming requirements" });
+		const compareAgain = comparison.getByRole("button", { name: "Compare again" });
+		const apply = comparison.getByRole("button", { name: "Apply reviewed changes" });
+		await review.click();
+		await expect(comparison.getByText("TX-6 · Revision 7", { exact: true })).toBeVisible();
+		await expect(comparison.getByRole("alert")).toContainText("Project changed after this comparison");
+		await expect(apply).toBeDisabled();
+		expect(writes).toEqual([]);
+		await compareAgain.click();
+		await expect(comparison.getByRole("alert")).toContainText("Failed to fetch");
+		await expect(comparison.getByText("TX-6 · Revision 7", { exact: true })).toBeVisible();
+		await expect(apply).toBeDisabled();
+		await expect(compareAgain).toBeEnabled();
+		expect(writes).toEqual([`POST ${comparePath}`]);
+		await page.screenshot({ path: testInfo.outputPath("stale-comparison-after-response-loss.png"), fullPage: true });
+		await compareAgain.click();
+		await expect(comparison.getByText("TX-6 · Revision 8", { exact: true })).toBeVisible();
+		await expect(comparison.getByText(warning, { exact: true })).toBeVisible();
+		await expect(apply).toBeEnabled();
+
+		await page.reload();
+		await expect(review).toHaveCount(1);
+		await expect(page.getByText(/^Pending imports \(\d+\)$/)).toHaveCount(0);
+		await expect(comparison).toHaveCount(0);
+		const workspaceNav = page.getByRole("navigation", { name: "Project workspaces" });
+		if (inputsWorkspace) await workspaceNav.getByRole("link", { name: "Review", exact: true }).click();
+		await openRequirement(page, "REQ-001");
+		await expect(workbench(page).getByRole("button", { name: `Review REQ-001: ${revisedText}` })).toBeVisible();
+		await expect(page.getByLabel("Review status for REQ-001", { exact: true })).toHaveValue("Approved");
+		await workbench(page).getByText("Source evidence (1)", { exact: true }).click();
+		await expect(workbench(page).getByText("Original IDs: TASK-01", { exact: true })).toBeVisible();
+		await expect(workbench(page).getByText(revisedSource.label, { exact: true })).toBeVisible();
+		if (inputsWorkspace) await workspaceNav.getByRole("link", { name: "Inputs", exact: true }).click();
+		await review.click();
+		await expect(comparison.getByText("TX-6 · Revision 8", { exact: true })).toBeVisible();
+		await expect(comparison.getByText(warning, { exact: true })).toBeVisible();
+		await expect(apply).toBeEnabled();
+		expect(writes).toEqual([`POST ${comparePath}`, `POST ${comparePath}`]);
+		expect(state.extractions).toEqual([]);
+		expect(state.applies).toEqual([]);
+		expect(state.getProject()).toEqual(baseline);
+		await page.screenshot({ path: testInfo.outputPath("recovered-comparison.png"), fullPage: true });
+	}
+);
 
 test("comparison works on narrow screens and passes focused accessibility checks", async ({ page }) => {
 	await page.setViewportSize({ width: 390, height: 844 });

@@ -12,8 +12,10 @@ from ..contracts.requirements import Requirement
 from ..utils.workflow_diagnostics import RETAINED_REQUIREMENT_DRAFT_WARNING, REVIEW_SCHEMA_INVALID
 from . import provider_journey_budget as journeys
 from .approval_continuation import ContinuationOptions, enqueue_approval
+from .audit_service import USAGE_EVENTS_COLLECTION
 from .guidance_service import public_manifest
 from .firestore_repository import get_required_firestore_client
+from .project_draft_admission import extraction_attempt_has_journey
 from .requirement_reconciliation import build_preview, canonical_requirements, digest, reconcile
 from .requirement_scope import eligible_generation_scope
 from .workflow_project_service import get_project, DOWNSTREAM_STAGES
@@ -43,6 +45,17 @@ def _bounded(payload):
     if len(json.dumps(payload, default=str).encode()) > 850_000:
         raise HTTPException(413, "Requirement comparison exceeds the storage limit. Import a smaller batch.")
     return payload
+
+
+def _stored_preview(preview, retired, workflow_payload, **private):
+    return _bounded(
+        {
+            **preview.model_dump(mode="json"),
+            "retired_requirements": [r.model_dump(mode="json") for r in retired],
+            "workflow_payload": workflow_payload,
+            **private,
+        }
+    )
 
 
 def check_extraction_receipt(data, fingerprint, *, require_pending=True):
@@ -140,11 +153,40 @@ class RequirementImportRepository:
         project = _owned(doc.get().to_dict(), actor)
         if expected is not None:
             _revision(project, expected)
+        return project, self._requirements_snapshot(doc, project)
+
+    def _requirements_snapshot(self, doc, project, transaction=None):
         sid = (project.get("stage_state", {}).get("requirements") or {}).get("current_snapshot_id")
-        snapshot = doc.collection("snapshots").document(sid).get().to_dict() if sid else None
+        snapshot = doc.collection("snapshots").document(sid).get(transaction=transaction).to_dict() if sid else None
         if sid and not snapshot:
             raise HTTPException(409, "Current requirements snapshot is unavailable.")
-        return project, snapshot
+        if (
+            transaction is not None
+            and snapshot
+            and (snapshot.get("snapshot_id"), snapshot.get("stage"), snapshot.get("project_id")) != (sid, "requirements", doc.id)
+        ):
+            raise journeys.unavailable()
+        return snapshot
+
+    def guard_unenrolled_preview(self, doc, preview, actor, transaction=None):
+        operation = preview.get("operation")
+        extraction = preview.get("extraction") or {}
+        event_id = extraction.get("source_event_id")
+        if operation not in journeys.INTAKE_OPERATIONS or not isinstance(event_id, str) or not event_id or "/" in event_id:
+            return
+        event = self.client.collection(USAGE_EVENTS_COLLECTION).document(event_id).get(transaction=transaction).to_dict() or {}
+        request_id = event.get("request_id")
+        metadata = event.get("metadata") or {}
+        import_id = preview.get("import_id")
+        if (
+            event.get("actor_user_id") == actor.sub
+            and event.get("workflow_run_id") == extraction.get("workflow_run_id")
+            and metadata.get("project_id") == doc.id
+            and metadata.get("import_id") == import_id
+            and isinstance(request_id, str)
+            and extraction_attempt_has_journey(transaction, doc, actor.sub, operation, request_id, import_id)
+        ):
+            raise journeys.unavailable()
 
     def read(self, project_id, import_id, actor):
         self.baseline(project_id, actor)
@@ -170,14 +212,7 @@ class RequirementImportRepository:
     def _save_preview(self, preview, actor, retired, workflow_payload, *, extraction=None, commit_audit=None, admission=None):
         doc = self.project_doc(preview.project_id)
         ref = doc.collection("requirement_imports").document(preview.import_id)
-        data = _bounded(
-            {
-                **preview.model_dump(mode="json"),
-                "retired_requirements": [r.model_dump(mode="json") for r in retired],
-                "workflow_payload": workflow_payload,
-                **({"extraction": extraction} if extraction is not None else {}),
-            }
-        )
+        data = _stored_preview(preview, retired, workflow_payload, **({"extraction": extraction} if extraction is not None else {}))
 
         @transactional
         def save(transaction):
@@ -196,6 +231,80 @@ class RequirementImportRepository:
             return data
 
         return save(self.client.transaction())
+
+    def compare_enrolled(self, project_id, import_id, actor, prior):
+        doc = self.project_doc(project_id)
+        imports = doc.collection("requirement_imports")
+        predecessor = imports.document(import_id)
+        proposed = None
+        if prior.get("status") == "pending":
+            old = _pending_comparison(prior)
+            project, baseline = self.baseline(project_id, actor)
+            revision = project["current_revision"]
+            if old.base_project_revision > revision:
+                raise journeys.unavailable()
+            if old.base_project_revision < revision:
+                current, retired = canonical_requirements(project_id, baseline)
+                successor_id = journeys.comparison_import_id(project_id, import_id, revision)
+                workflow = prior.get("workflow_payload") or {}
+                proposed = (_compare_saved(old, current, revision, successor_id, workflow, use_model=False), retired, workflow, baseline)
+
+        @transactional
+        def compare(transaction):
+            project = _owned(doc.get(transaction=transaction).to_dict(), actor)
+            data = predecessor.get(transaction=transaction).to_dict()
+            if not data:
+                raise HTTPException(404, "Import preview not found")
+            if data.get("import_id") != import_id:
+                raise journeys.unavailable()
+            if "superseded_by_import_id" in data:
+                replacement_id = data["superseded_by_import_id"]
+                if not isinstance(replacement_id, str) or not replacement_id or "/" in replacement_id:
+                    raise journeys.unavailable()
+                replacement = imports.document(replacement_id).get(transaction=transaction).to_dict()
+                if not replacement or replacement.get("status") != "pending":
+                    raise HTTPException(409, "This comparison was replaced. Open the current saved import.")
+                comparison = replacement.get(journeys.COMPARISON_FIELD)
+                if (
+                    data.get("status") != "cancelled"
+                    or not isinstance(comparison, dict)
+                    or comparison.get("predecessor_import_id") != import_id
+                    or replacement.get("import_id") != replacement_id
+                    or journeys.budget_for_preview(transaction, doc, actor.sub, replacement) is None
+                ):
+                    raise journeys.unavailable()
+                return replacement
+
+            old = _pending_comparison(data)
+            budget = journeys.budget_for_preview(transaction, doc, actor.sub, data)
+            if budget is None:
+                raise journeys.unavailable()
+            if old.base_project_revision == project["current_revision"]:
+                return data
+            if proposed is None:
+                _revision(project, old.base_project_revision)
+            preview, retired, workflow, baseline = proposed
+            _revision(project, preview.base_project_revision)
+            if data != prior or self._requirements_snapshot(doc, project, transaction) != baseline:
+                raise journeys.unavailable()
+            saved = _stored_preview(
+                preview,
+                retired,
+                workflow,
+                **{
+                    journeys.COMPARISON_FIELD: {
+                        journeys.BUDGET_FIELD: budget.id,
+                        "intake_import_id": budget.data["import_id"],
+                        "predecessor_import_id": import_id,
+                    }
+                },
+            )
+            transaction.create(imports.document(preview.import_id), saved)
+            transaction.update(predecessor, {"status": "cancelled", "superseded_by_import_id": preview.import_id})
+            journeys.advance_comparison(transaction, budget, saved, import_id)
+            return saved
+
+        return RequirementImportPreview.model_validate(compare(self.client.transaction()))
 
     def list_pending(self, project_id, actor):
         self.baseline(project_id, actor)
@@ -218,6 +327,8 @@ class RequirementImportRepository:
                 raise HTTPException(404, "Import preview not found")
             if data.get("status") == "applied":
                 raise HTTPException(409, "This import has already been applied.")
+            if data.get("superseded_by_import_id"):
+                raise HTTPException(409, "This comparison was replaced. Open the current saved import before cancelling.")
             transaction.update(ref, {"status": "cancelled"})
 
         cancel(self.client.transaction())
@@ -245,8 +356,17 @@ class RequirementImportRepository:
             _revision(project, preview.base_project_revision)
             if decision.base_project_revision != preview.base_project_revision:
                 raise HTTPException(409, "Apply must use the reviewed preview's project revision.")
+            if preview.import_id != import_id and journeys.enrolled_preview(data):
+                raise journeys.unavailable()
             budget = journeys.budget_for_preview(transaction, doc, actor.sub, data)
-            active, retired, counts = reconcile(preview, decision, [Requirement.model_validate(r) for r in data.get("retired_requirements", [])])
+            retired = [Requirement.model_validate(r) for r in data.get("retired_requirements", [])]
+            if budget is None:
+                self.guard_unenrolled_preview(doc, data, actor, transaction)
+            else:
+                current, current_retired = canonical_requirements(project_id, self._requirements_snapshot(doc, project, transaction))
+                if preview.current_requirements != current or retired != current_retired:
+                    raise journeys.unavailable()
+            active, retired, counts = reconcile(preview, decision, retired)
             payload = {
                 **data.get("workflow_payload", {}),
                 "requirements": [r.model_dump(mode="json") for r in active],
@@ -448,26 +568,44 @@ def stage_extraction(repo, project_id, actor, revision, response, operation, imp
     return repo._save_preview(preview, actor, retired, workflow, extraction=extraction, commit_audit=commit_audit, admission=admission)
 
 
-def recompare_import(project_id, import_id, actor):
-    repo = repository()
-    data = repo.read(project_id, import_id, actor)
+def _pending_comparison(data):
     old = RequirementImportPreview.model_validate(data)
     if old.status != "pending":
         raise HTTPException(409, "Only pending imports can be compared again.")
     if old.recovery_snapshot_ids:
         raise HTTPException(409, "Project changed. Prepare a new recovery comparison from the historical snapshots.")
-    project, snapshot = repo.baseline(project_id, actor)
-    current, retired = canonical_requirements(project_id, snapshot)
+    return old
+
+
+def _compare_saved(old, current, revision, import_id, workflow, *, use_model):
+    if not use_model and current == old.current_requirements:
+        # With identical canonical requirements the saved suggestions still refer to this baseline.
+        return old.model_copy(update={"import_id": import_id, "base_project_revision": revision, "created_at": datetime.now(timezone.utc)})
     incoming = [c.requirement for c in old.candidates]
     _bounded({"current": [r.model_dump(mode="json") for r in current], "incoming": [r.model_dump(mode="json") for r in incoming]})
-    matches, failed = suggest_matches(current, incoming)
-    preview = build_preview(project_id, project["current_revision"], current, incoming, old.source_name, old.operation, str(uuid4()), matches, failed)
+    matches, failed = suggest_matches(current, incoming) if use_model else ({}, bool(current))
+    preview = build_preview(old.project_id, revision, current, incoming, old.source_name, old.operation, import_id, matches, failed)
+    if failed and not use_model:
+        preview.warnings[0] = "Compared saved evidence without another model request. Review unmatched requirements manually."
     preview.guidance = old.guidance
     preview.source_evidence_findings = old.source_evidence_findings
     if RETAINED_REQUIREMENT_DRAFT_WARNING in old.warnings:
         preview.warnings.append(RETAINED_REQUIREMENT_DRAFT_WARNING)
-    workflow = data.get("workflow_payload") or {}
     preview.warnings.extend(workflow.get("source_extraction_warnings") or [])
+    return preview
+
+
+def recompare_import(project_id, import_id, actor):
+    repo = repository()
+    data = repo.read(project_id, import_id, actor)
+    if journeys.enrolled_preview(data):
+        return repo.compare_enrolled(project_id, import_id, actor, data)
+    old = _pending_comparison(data)
+    repo.guard_unenrolled_preview(repo.project_doc(project_id), data, actor)
+    project, snapshot = repo.baseline(project_id, actor)
+    current, retired = canonical_requirements(project_id, snapshot)
+    workflow = data.get("workflow_payload") or {}
+    preview = _compare_saved(old, current, project["current_revision"], str(uuid4()), workflow, use_model=True)
     result = repo.save(preview, actor, retired, workflow)
     repo.cancel(project_id, import_id, actor)
     return result

@@ -258,8 +258,7 @@ Connector extraction uses the existing requirement tariff. The pending
 preview keeps its source provenance and exact replay. If a selected source
 produces no requirements or needs fallback review, the preview names that
 source and leaves its requirements unapproved. Standalone and flag-off
-intake use the existing workflow. Semantic recompare and recovery still need
-their own admission and evidence.
+intake use the existing workflow.
 
 ### One request budget for an exact intake-backed journey
 
@@ -277,6 +276,16 @@ The plan, first suite and exact assessment or repair successors keep private
 links to the same budget. Publication and its link commit together. Pending
 or cancelled imports cannot attach a new project baseline.
 
+**Compare again** on a stale enrolled preview uses its saved incoming evidence
+without dispatching or billing again. It keeps the saved matches when the
+canonical Requirements baseline is unchanged. A changed baseline gets exact,
+verified-source and similar-wording suggestions and calls for a deliberate
+decision on unmatched rows. The old preview, its exact replacement and the
+budget's active preview update together. Concurrent Compare requests and a
+retry after a lost response return the same pending comparison. Apply still
+requires reviewed choices against the current revision. The original intake
+receipt and reservation remain attached to the journey through flag rollback.
+
 Capacity is reserved before possible provider contact and is retained after
 interruption or acknowledgement. Successful replays read their existing
 results. An allocated stage stops with a known reason before provider contact.
@@ -288,9 +297,9 @@ provider charges.
 
 This applies to the opt-in named journey from an enrolled file or connector
 preview and its exact suite successors. Existing file records without an
-origin field remain readable as file intake. Legacy plans without enrollment,
-standalone feedback refinement, semantic recompare or recovery, and Project
-Sync continue under their existing stage policies.
+origin field remain readable as file intake. Legacy plans and comparisons
+without enrollment, standalone feedback refinement, historical snapshot
+recovery, and Project Sync continue under their existing stage policies.
 
 ### Shared draft admission and assessment recovery
 

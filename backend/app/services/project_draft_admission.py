@@ -137,6 +137,12 @@ def _is_operation_id(value):
     return isinstance(value, str) and re.fullmatch(r"draft_[0-9a-f]{64}", value) is not None
 
 
+def extraction_attempt_has_journey(transaction, project_doc, actor_id, operation, request_id, import_id):
+    operation_id = _operation_id(project_doc.id, actor_id, operation, request_id)
+    attempt = _read(transaction, _attempt_doc(project_doc, operation_id)) or {}
+    return (attempt.get("requirement_extraction") or {}).get("import_id") == import_id and journeys.BUDGET_FIELD in attempt
+
+
 def _read(transaction, doc, *, field_paths=None):
     return doc.get(transaction=transaction, field_paths=field_paths).to_dict()
 
