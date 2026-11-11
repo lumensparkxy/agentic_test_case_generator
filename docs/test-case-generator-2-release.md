@@ -1,8 +1,7 @@
 # Test Case Generator 2.0 release verification
 
 The implementation lives on `codex/version_2_0`. The frozen baseline is
-`2f6458d3d1bb68197ba2b5572261870277c8cadb`. The phase history is in the
-[implementation record](test-case-generator-2-continuation.md). Use the
+`2f6458d3d1bb68197ba2b5572261870277c8cadb`. Use the
 [frozen evaluation protocol](test-case-generator-2-evaluation.md) for the
 fixed thresholds. The application verified for this release record is
 `5f7c712d38d5d2a8394804d676114d200431781e`. Both required CI checks passed
@@ -10,6 +9,39 @@ on that commit. The stack is held for final merge approval and the evaluation
 scope is offline only.
 [PR #589](https://github.com/lumensparkxy/agentic_test_case_generator/pull/589) ·
 [CI run](https://github.com/lumensparkxy/agentic_test_case_generator/actions/runs/42928440143)
+
+## Desktop workspaces
+
+Set `VITE_PROJECT_WORKSPACES_V2=true` when building the frontend to enable
+Inputs, Review and Deliver. The default is false. Local approval continuation
+also requires `VITE_APPROVAL_CONTINUATION_ENABLED=true` and the server settings
+under [Local rollout and rollback](#local-rollout-and-rollback).
+
+| Section | Route suffix | Compatible alias |
+| --- | --- | --- |
+| Inputs · Sources | `/inputs` | `/requirements` |
+| Inputs · Context | `/inputs/context` | `/context` |
+| Review · Scope | `/review` | `/requirements` |
+| Review · Scenarios | `/review/scenarios` | `/use-cases` |
+| Review · Tests | `/review/tests` | `/test-cases` |
+| Deliver · Export | `/deliver` | `/reports` |
+| Deliver · Browser tests | `/deliver/browser-tests` | `/automation` |
+
+Routes follow `/projects/:projectId`. Review opens the current scope or scenario
+decision, then Tests after the exact scenario plan is approved. Scope and
+scenario approvals remain explicit decisions. When enabled, background work
+continues from each saved approval.
+
+Review starts with the app menu collapsed. **Show app menu** reveals global
+navigation and focuses Home. Escape closes the menu and restores focus to its
+toggle. **Hide app menu** returns the space to the artifacts. The choice carries
+across Review sections during the session and resets on reload. Suite quality
+and supporting evidence expand on demand. Assessment and recovery controls
+share a row when space permits and stack at higher zoom.
+
+The selected test, filters and drafts are scoped to the user, project and saved
+suite. Case, run and report links retain their original evidence. **Project
+status** opens the project overview.
 
 ## Acceptance evidence
 
@@ -25,128 +57,15 @@ scope is offline only.
 | Runtime cost and latency | The offline ledger exercised bounded mock reservation and settlement. | Paired provider cost and latency within the 20% median ceiling, with call and token coverage. |
 | Rollback | The same local project and Chromium session passed through enabled, compatible and restored bundles at `61b7d66`, with all twelve public evidence digests unchanged. The server restart at that pin preserved exact replay while refusing fresh admission. [PR #534](https://github.com/lumensparkxy/agentic_test_case_generator/pull/534) | Hosted rollout and operator verification. |
 
-The matched desktop replay used mocked Chromium at the frozen baseline and
-`5f7c712`. Both arms started at revision 2 from byte-identical saved input
-snapshots with both decisions pending. All four frozen fixture hashes matched.
-Both readers displayed the same TC-202 and its saved assertion, and a direct
-case lookup resolved to each arm's exact suite. The two exported case rows
-matched, including literal whitespace in TC-101. Each export also matched
-its earlier archived file byte for byte. The fixture used the legacy approved
-export policy. This measures deliberate actions in one engineering pair.
-Participant time and waiting remain unmeasured.
-
-The archived baseline facilitator preflight opened Context. The fresh
-candidate preflight opened Inputs Context at 1440 × 900. Both ran headless
-Chromium 151.0.7922.34 against loopback mocks with identical Requirements
-and Context snapshot IDs, input hashes and four fixture hashes. Both
-decisions were pending. Each check observed 1.2 seconds of idle time with
-zero writes or approvals. The archive passed its manifest check, and the
-frozen protocol and observer code matched the earlier kit byte for byte.
-The earlier headed facilitator dry checks used `61b7d66`.
-
-At `db54730`, Review starts with the app-wide menu collapsed. In the matched
-layout fixture, the first requirement row, scenario group, selected test and
-first expected result each start 76 CSS pixels higher at 1366, 1440 and 1920
-pixels wide. The 1440-pixel keyboard check preserved the selected case and
-search filter in a 200-case suite. The 390-pixel check verified the menu and
-project controls without horizontal overflow.
-[PR #583](https://github.com/lumensparkxy/agentic_test_case_generator/pull/583)
-
-At `5f7c712`, the saved-suite assessment and recovery actions share one row
-when the workbench has room. At 1440 × 900 the requirement and scenario
-tables start 179 CSS pixels higher than the original layout fixture. The
-selected test and its first expected result start 278 pixels higher. At
-200% CSS zoom the actions fit within stacked panels. The check used
-synthetic saved artifacts in Chromium.
-[PR #589](https://github.com/lumensparkxy/agentic_test_case_generator/pull/589)
-
-Deliver blocks fresh files for stale suite sources. An exact human request for
-changes or a recorded proof that needs reassessment, shows design gaps, or
-cannot be verified requires a reasoned draft where sources permit delivery.
-Paired policy checks preserved ordinary approval for a legacy suite without
-recorded proof and reviewed-design eligibility for the verified control.
-Historical reports retained their recorded classification and case versions.
-[Human decision](https://github.com/lumensparkxy/agentic_test_case_generator/pull/580) ·
-[Source freshness](https://github.com/lumensparkxy/agentic_test_case_generator/pull/581) ·
-[Recorded design proof](https://github.com/lumensparkxy/agentic_test_case_generator/pull/582)
-
-Browser tests blocks Run when the saved suite has stale sources. The 2.0 Run
-action also sends the saved Preview's request ID. The API verifies the suite,
-revision, target and compiled candidates before launching the selected cases.
-In the controlled `091c45a` loopback replay, the real Preview and Run routes
-used an in-memory project store and Chromium. The selected Checkout case
-passed healthy and failed at its original heading assertion on the seeded
-fault. Both runs recorded the original suite and requested only `/checkout`.
-[Stale source Run gate](https://github.com/lumensparkxy/agentic_test_case_generator/pull/586) ·
-[Saved Preview binding](https://github.com/lumensparkxy/agentic_test_case_generator/pull/587)
-
-The read-only W11 delivery replay at `db54730` hydrated all 13 exact saved
-cases per checkpoint and reproduced their archived JSON rows and version
-evidence. Both baseline checkpoints qualified for ordinary approved files
-and both candidate checkpoints qualified for reviewed-design files.
-
-The authored W11 browser replay exercised the original and revised booking
-limits. The frozen baseline passed all ten original and nine revised cases
-admitted to Chromium. The candidate at `a95c27b` passed eleven at each
-checkpoint, including the exact saved lower-bound check after reopening.
-Seven unaffected case versions stayed exact. The revised case rejected seven
-attendees and found the same saved count after reopening. Against the old
-limit it failed at the intended inline assertion. Both arms refused a fresh
-Run on stale source. [#522](https://github.com/lumensparkxy/agentic_test_case_generator/issues/522)
-
-The worker recovery replay pinned `bb500a685fcb1be0ae4e47833d1a1238d896e801`
-and used loopback Firestore with a synthetic SDK transport. Fresh workers
-resumed two jobs stopped before dispatch, marked four jobs with uncertain
-dispatch interrupted, and recovered two jobs stopped after publication.
-Eight repeat polls preserved exact evidence with zero additional provider
-attempts. Each published artifact had one usage event. Each published Test
-Cases suite had one local shadow billing receipt and an exact case readback.
-The phase PR records the reproduction command and evidence hashes.
-
-The rendered rollback at `61b7d66` used one disposable Firestore project
-at revision 16 and one Chromium session at 1440×900. The seed saved a historical
-reasoned-draft JSON report, a successor report with a distinct case version,
-and a healthy and seeded-fault Directory run. Both aliases resolved in all
-three bundle states. The browser followed six historical report-to-case
-round trips, twelve run-to-case round trips, six direct case links and six
-exact failed-run Context links. The latter focused Quality feedback and
-showed one linked finding, excluding unrelated preview and scenario notes.
-
-The browser made 534 GETs with zero API mutations, automatic runs, unexpected
-requests or page errors. The storage audit compared all 67 Firestore
-documents. Sixty-five matched exactly. Existing entitlement reads refreshed
-only `updated_at` on the owner billing account and user profile. All project
-evidence matched. The harness blocked 36 optional font stylesheet requests
-and all provider traffic. The extra orchestrator status read compared with
-the previous rehearsal kept the same evidence. The phase PR records the
-manifest, input and file digests, browser captures, and reproduction command.
-
-In a separate W01 server rehearsal at the same pin, Chromium exported the
-11 exact reviewed cases as JSON. The local worker finished and the outbox
-was empty before the API restarted with reviewed-design delivery disabled.
-The second process replayed the original request with HTTP 200 and
-byte-identical JSON. A fresh request against the current revision returned
-HTTP 409 with `design_delivery_disabled`. The exact saved report and
-original case still matched. All 59 Firestore document contents and update
-times were identical across the restart and readback. The worker used
-six authored SDK responses in the loopback emulator. The client and server
-lanes use separate isolated projects.
-
-The full backend suite passed 1,075 tests on the rollback pin `61b7d66`,
-including the opt-in loopback Chromium target-binding test. The clean archive
-contained no local `.env` and used read-only Git metadata for the provenance
-checks. Both required CI jobs passed separately.
-[Rollback CI](https://github.com/lumensparkxy/agentic_test_case_generator/actions/runs/42789788414)
-
-The frozen W07 pair and the earlier reasoned-draft capture remain as
-recorded. The separate current-pin replay kept both approved case contents
-and exact literal values while the structural review moved from 89 to 95 at
-the unchanged threshold of 90. It exported reviewed-design JSON and admitted
-both cases in Preview. A distinct execution capture then ran both exact
-saved cases healthy and the three authored faults with matching compiled
-assertions. These results support controlled artifact and execution behavior.
-Live generation, independent artifact judgments and practitioner acceptance
-remain open. [PR #534](https://github.com/lumensparkxy/agentic_test_case_generator/pull/534)
+The offline engineering comparison measured seven versus eleven deliberate
+actions with both approvals and the same saved and exported test cases. The
+matched desktop layout check placed Requirements and Scenarios 179 CSS pixels
+higher, and the selected test and its first expected result 278 pixels higher,
+at 1440 × 900. The user approved the compact layout after trying a local
+synthetic preview. The five-person practitioner study retains its separate
+acceptance criteria.
+[Layout verification](https://github.com/lumensparkxy/agentic_test_case_generator/pull/589) ·
+[Study preflight](https://github.com/lumensparkxy/agentic_test_case_generator/pull/590)
 
 ## Local rollout and rollback
 
