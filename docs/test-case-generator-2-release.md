@@ -5,18 +5,18 @@ The implementation lives on `codex/version_2_0`. The frozen baseline is
 [implementation record](test-case-generator-2-continuation.md). Use the
 [frozen evaluation protocol](test-case-generator-2-evaluation.md) for the
 fixed thresholds. The application verified for this release record is
-`091c45ad6b3b8c4041308fb1c4a0b048be32cadf`. Both required CI checks passed
+`5f7c712d38d5d2a8394804d676114d200431781e`. Both required CI checks passed
 on that commit. The stack is held for final merge approval and the evaluation
 scope is offline only.
-[PR #587](https://github.com/lumensparkxy/agentic_test_case_generator/pull/587) ·
-[CI run](https://github.com/lumensparkxy/agentic_test_case_generator/actions/runs/42922773574)
+[PR #589](https://github.com/lumensparkxy/agentic_test_case_generator/pull/589) ·
+[CI run](https://github.com/lumensparkxy/agentic_test_case_generator/actions/runs/42928440143)
 
 ## Acceptance evidence
 
 | Gate | Evidence | Open requirement |
 | --- | --- | --- |
-| User effort | The matched Chromium replay at `091c45a` took seven deliberate actions against eleven, a 36.4% reduction against the 30% target. Both arms used identical saved inputs, made two explicit approvals, inspected TC-202, and changed workbenches four times. | Practitioner active time and waiting. |
-| Practitioner completion and review effort | The private kit pairs the frozen baseline with `091c45a`. Headless runtime preflight loaded identical saved inputs in both builds and recorded zero writes or approvals. The package and observer checks passed. Zero participant sessions have been collected. | At least four of five unassisted completions, 20% fewer median corrections per adjudicated obligation, and non-increasing active review time. [#354](https://github.com/lumensparkxy/agentic_test_case_generator/issues/354) |
+| User effort | The matched Chromium replay at `5f7c712` took seven deliberate actions against eleven, a 36.4% reduction against the 30% target. Both arms used identical saved inputs, made two explicit approvals, inspected TC-202, and changed workbenches four times. | Practitioner active time and waiting. |
+| Practitioner completion and review effort | The private kit pairs the frozen baseline with `5f7c712`. The fresh headless candidate matched the archived baseline starting state with zero writes or approvals. The updated archive manifest passed. Zero participant sessions have been collected. | At least four of five unassisted completions, 20% fewer median corrections per adjudicated obligation, and non-increasing active review time. [#354](https://github.com/lumensparkxy/agentic_test_case_generator/issues/354) |
 | Business coverage and unsupported facts | The offline intake and scorer bind obligation and fact judgments to exact saved and exported cases and retain unknowns. The held integration calibration preserved exact cases and removed fabricated dependencies from saved analysis. [PR #534](https://github.com/lumensparkxy/agentic_test_case_generator/pull/534) | Independently adjudicated coverage of at least 95%, zero critical misses or unsupported facts, and non-regression on the generated cohort. [#495](https://github.com/lumensparkxy/agentic_test_case_generator/issues/495) |
 | Healthy reliability and defect sensitivity | W01 preserved eleven authored cases per arm, passed every eligible healthy case, and detected all eight seeded variants in each arm. At `61b7d66` both exact authored W07 cases passed healthy and all three seeded variants failed at their intended first assertion. [PR #520](https://github.com/lumensparkxy/agentic_test_case_generator/pull/520) · [PR #534](https://github.com/lumensparkxy/agentic_test_case_generator/pull/534) | The 95% healthy reliability and 90% intended fault detection thresholds apply to generated applicable cases across the frozen targets. |
 | Evaluator correctness | The structural assessor kept five valid authored controls and rejected both defective whitespace controls. The separate retry comparison removed two false unmet findings on identical saved Manual cases. [PR #514](https://github.com/lumensparkxy/agentic_test_case_generator/pull/514) · [PR #530](https://github.com/lumensparkxy/agentic_test_case_generator/pull/530) | Independent verdicts and paired live assessor outputs. [#513](https://github.com/lumensparkxy/agentic_test_case_generator/issues/513) |
@@ -26,7 +26,7 @@ scope is offline only.
 | Rollback | The same local project and Chromium session passed through enabled, compatible and restored bundles at `61b7d66`, with all twelve public evidence digests unchanged. The server restart at that pin preserved exact replay while refusing fresh admission. [PR #534](https://github.com/lumensparkxy/agentic_test_case_generator/pull/534) | Hosted rollout and operator verification. |
 
 The matched desktop replay used mocked Chromium at the frozen baseline and
-`091c45a`. Both arms started at revision 2 from byte-identical saved input
+`5f7c712`. Both arms started at revision 2 from byte-identical saved input
 snapshots with both decisions pending. All four frozen fixture hashes matched.
 Both readers displayed the same TC-202 and its saved assertion, and a direct
 case lookup resolved to each arm's exact suite. The two exported case rows
@@ -35,13 +35,14 @@ its earlier archived file byte for byte. The fixture used the legacy approved
 export policy. This measures deliberate actions in one engineering pair.
 Participant time and waiting remain unmeasured.
 
-The headless facilitator preflight opened Context in the frozen baseline and
-Inputs Context in the candidate at 1440 × 900. Both ran Chromium 151.0.7922.34
-against loopback mocks with identical saved Requirements and Context snapshot
-IDs, input hashes and four fixture hashes. Both decisions were pending. The
-runner observed 1.2 seconds of idle time with zero writes or approvals and then
-closed the browser. The earlier headed facilitator dry checks used `61b7d66`.
-The current evidence verifies the study's starting state.
+The archived baseline facilitator preflight opened Context. The fresh
+candidate preflight opened Inputs Context at 1440 × 900. Both ran headless
+Chromium 151.0.7922.34 against loopback mocks with identical Requirements
+and Context snapshot IDs, input hashes and four fixture hashes. Both
+decisions were pending. Each check observed 1.2 seconds of idle time with
+zero writes or approvals. The archive passed its manifest check, and the
+frozen protocol and observer code matched the earlier kit byte for byte.
+The earlier headed facilitator dry checks used `61b7d66`.
 
 At `db54730`, Review starts with the app-wide menu collapsed. In the matched
 layout fixture, the first requirement row, scenario group, selected test and
@@ -50,6 +51,14 @@ pixels wide. The 1440-pixel keyboard check preserved the selected case and
 search filter in a 200-case suite. The 390-pixel check verified the menu and
 project controls without horizontal overflow.
 [PR #583](https://github.com/lumensparkxy/agentic_test_case_generator/pull/583)
+
+At `5f7c712`, the saved-suite assessment and recovery actions share one row
+when the workbench has room. At 1440 × 900 the requirement and scenario
+tables start 179 CSS pixels higher than the original layout fixture. The
+selected test and its first expected result start 278 pixels higher. At
+200% CSS zoom the actions fit within stacked panels. The check used
+synthetic saved artifacts in Chromium.
+[PR #589](https://github.com/lumensparkxy/agentic_test_case_generator/pull/589)
 
 Deliver blocks fresh files for stale suite sources. An exact human request for
 changes or a recorded proof that needs reassessment, shows design gaps, or
