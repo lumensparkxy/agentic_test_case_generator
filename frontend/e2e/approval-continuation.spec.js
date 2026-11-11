@@ -613,6 +613,14 @@ test.describe("Recoverable approval continuation", () => {
 		await expect(reviewSaved(page)).toBeVisible();
 		await expect(assertion).toBeVisible();
 		await expectNoDocumentOverflow(page);
+
+		await page.setViewportSize({ width: 1280, height: 900 });
+		await page.evaluate(() => {
+			document.documentElement.style.zoom = "2";
+		});
+		await expectVisuallyContained(checkReview(page), recovery(page));
+		await expect(reviewSaved(page)).toBeVisible();
+		await expectNoDocumentOverflow(page);
 		expect(api.writes).toEqual([]);
 		expect(api.errors).toEqual([]);
 	});
